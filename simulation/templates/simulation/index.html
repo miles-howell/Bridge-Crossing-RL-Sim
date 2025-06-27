@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+{% load static %}
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>Advanced RL Simulation</title>
+    <style>
+        body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #3d4551; font-family: 'Inter', sans-serif; color: #f0f0f0;}
+        .main-container { display: flex; flex-direction: row; gap: 20px; align-items: flex-start; justify-content: center; width: 100%; padding: 20px; }
+        .canvas-container { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+        canvas { background-color: #2b2b2b; border: 2px solid #1a1a1a; border-radius: 8px; max-width: 100%; image-rendering: pixelated; aspect-ratio: 2 / 1; }
+        #ui-panel { display: flex; flex-direction: column; gap: 15px; width: 250px; flex-shrink: 0; }
+        #controls { display: grid; grid-template-columns: 1fr; gap: 10px; width: 100%; }
+        .control-group, .ui-box { background: #4a5462; color: #e0e0e0; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); border: 1px solid #5a6472; }
+        .control-group { display: flex; flex-direction: column; align-items: center; }
+        label { margin-bottom: 5px; font-weight: bold; font-size: 14px; }
+        input[type="range"] { width: 80%; }
+        #resetButton { width: 100%; padding: 12px 24px; font-size: 16px; cursor: pointer; border-radius: 5px; border: none; background-color: #5d9a5f; color: white; transition: background-color 0.3s; font-weight: bold; margin-top: 5px; }
+        #resetButton:hover { background-color: #6db46f; }
+        #status { text-align: center; font-size: 18px; font-weight: bold; min-height: 27px; margin-bottom: 10px; }
+        .ui-box h3 { margin-top: 0; text-align: center; border-bottom: 1px solid #5a6472; padding-bottom: 10px; }
+        .ui-box p { margin: 5px 0; font-size: 14px; display: flex; justify-content: space-between; }
+        .vis-toggle { display: flex; flex-wrap: wrap; gap: 4px; justify-content: space-around; background: #3d4551; border-radius: 6px; padding: 4px; }
+        .vis-toggle button { background: transparent; border: none; color: #a0aec0; padding: 4px 8px; font-size: 12px; font-weight: bold; cursor: pointer; border-radius: 4px; flex-grow: 1; }
+        .vis-toggle button.active { background: #6db46f; color: white; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="status">Status: Loading assets...</div>
+    <div class="main-container">
+        <div class="canvas-container">
+             <canvas id="simulationCanvas"></canvas>
+             <canvas id="qValueCanvas"></canvas>
+        </div>
+        <div id="ui-panel">
+            <div id="score-board" class="ui-box">
+                <h3>Scoreboard</h3>
+                <p><span>Episodes Completed:</span> <strong id="episodesCompleted">0</strong></p>
+                <hr class="border-slate-600 my-2">
+                <p><span>Best (Last 20):</span> <strong id="bestScore">N/A</strong></p>
+                <p><span>Worst (Last 20):</span> <strong id="worstScore">N/A</strong></p>
+                <p><span>Average (Last 20):</span> <strong id="avgScore">N/A</strong></p>
+            </div>
+             <div id="milestones-board" class="ui-box">
+                <h3>Milestones</h3>
+                <p><span>Log Picked Up:</span><strong id="ms-picked-up">0</strong></p>
+                <p><span>Bridge Placed:</span><strong id="ms-placed">0</strong></p>
+                <p><span>Bridge Crossed:</span><strong id="ms-crossed">0</strong></p>
+                <p><span>Reached Home:</span><strong id="ms-home">0</strong></p>
+            </div>
+             <div id="vis-control-board" class="ui-box">
+                <h3>Brain View</h3>
+                 <div class="vis-toggle" id="viewStateToggle">
+                    <button class="active" data-state="no_bridge">No Bridge</button>
+                    <button data-state="has_bridge">Has Bridge</button>
+                    <button data-state="bridge_placed">Bridge Placed</button>
+                    <button data-state="crossed_bridge">Crossed</button>
+                 </div>
+            </div>
+            <div id="controls">
+                <div class="control-group">
+                    <label for="agentsSlider">Agents (<span id="agentsValue">1</span>)</label>
+                    <input type="range" id="agentsSlider" min="1" max="10" step="1" value="1">
+                </div>
+                <div class="control-group">
+                    <label for="lrSlider">Learning Rate (<span id="lrValue">0.1</span>)</label>
+                    <input type="range" id="lrSlider" min="0.01" max="1" step="0.01" value="0.1">
+                </div>
+                <div class="control-group">
+                    <label for="erSlider">Exploration Rate (<span id="erValue">0.5</span>)</label>
+                    <input type="range" id="erSlider" min="0" max="1" step="0.01" value="0.5">
+                </div>
+                 <div class="control-group">
+                    <label for="curiositySlider">Curiosity Factor (<span id="curiosityValue">10</span>)</label>
+                    <input type="range" id="curiositySlider" min="0" max="50" step="1" value="10">
+                </div>
+                <div class="control-group">
+                    <label for="timeLimitSlider">Time Limit (<span id="timeLimitValue">-1000</span>)</label>
+                    <input type="range" id="timeLimitSlider" min="-2000" max="-200" step="100" value="-1000">
+                </div>
+                <div class="control-group">
+                    <label for="speedSlider">Sim Speed (<span id="speedValue">50</span>ms)</label>
+                    <input type="range" id="speedSlider" min="0" max="200" step="10" value="50">
+                </div>
+            </div>
+            <button id="resetButton">Start / Reset Simulation</button>
+        </div>
+    </div>
+
+    <script>
+        const simCanvas = document.getElementById('simulationCanvas');
+        const simCtx = simCanvas.getContext('2d');
+        const qCanvas = document.getElementById('qValueCanvas');
+        const qCtx = qCanvas.getContext('2d');
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        
+        const statusEl = document.getElementById('status');
+        const resetButton = document.getElementById('resetButton');
+        const agentsSlider = document.getElementById('agentsSlider'), lrSlider = document.getElementById('lrSlider'), erSlider = document.getElementById('erSlider'), speedSlider = document.getElementById('speedSlider'), curiositySlider = document.getElementById('curiositySlider'), timeLimitSlider = document.getElementById('timeLimitSlider');
+        const agentsValue = document.getElementById('agentsValue'), lrValue = document.getElementById('lrValue'), erValue = document.getElementById('erValue'), speedValue = document.getElementById('speedValue'), curiosityValue = document.getElementById('curiosityValue'), timeLimitValue = document.getElementById('timeLimitValue');
+        const episodesCompletedEl = document.getElementById('episodesCompleted'), bestScoreEl = document.getElementById('bestScore'), worstScoreEl = document.getElementById('worstScore'), avgScoreEl = document.getElementById('avgScore');
+        const milestoneElements = { picked_up: document.getElementById('ms-picked-up'), placed: document.getElementById('ms-placed'), crossed: document.getElementById('ms-crossed'), home: document.getElementById('ms-home') };
+        const viewStateToggle = document.getElementById('viewStateToggle');
+
+
+        let gameState = null;
+        let renderLoopRunning = false;
+        let simWorker = null;
+        let qValueData = null;
+        let qValueUpdateInterval = null;
+        let currentViewState = { has_bridge_piece: false, bridge_placed: false, has_crossed: false };
+
+        const charSheet = new Image();
+        const tileSheet = new Image();
+        let loadedAssets = 0;
+        const totalAssets = 2;
+        
+        charSheet.src = "{% static 'images/character.png' %}";
+        tileSheet.src = "{% static 'images/Overworld.png' %}";
+
+        charSheet.onload = tileSheet.onload = () => {
+            loadedAssets++;
+            if (loadedAssets === totalAssets) resizeAndInit();
+        };
+        charSheet.onerror = tileSheet.onerror = () => { console.error("Asset failed to load."); resizeAndInit(); };
+
+        const TILE_SOURCE_SIZE = 16;
+        
+        const TILE_MAP = {
+            'dirt': {x: 1, y: 4}, 'grass': {x: 0, y: 0},
+            'grass_border_t': {x: 1, y: 3}, 'grass_border_l': {x: 0, y: 4}, 'grass_border_r': {x: 2, y: 4}, 'grass_border_b': {x: 1, y: 5},
+            'grass_corner_tl': {x: 0, y: 3}, 'grass_corner_tr': {x: 2, y: 3}, 'grass_corner_bl': {x: 0, y: 5}, 'grass_corner_br': {x: 2, y: 5},
+            'water_grass_l': {x: 2, y: 7}, 'water_grass_r': {x: 4, y: 7}, 'water': {x: 3, y: 7},
+            'water_ripple': [ {x: 3, y: 1}, {x: 2, y: 1}, {x: 1, y: 1}, {x: 0, y: 1} ],
+            'bridge_asset': [ {x: 3, y: 5}, {x: 4, y: 5}, {x: 5, y: 5} ],
+            'house': [ [{x:13,y:5}, {x:14,y:5}], [{x:13,y:6}, {x:14,y:6}], [{x:13,y:7}, {x:14,y:7}] ]
+        };
+        
+        const CHAR_SPRITE_MAP = {
+            'DOWN':  [ { top: {x:0, y:0}, bottom: {x:0, y:1} }, { top: {x:1, y:0}, bottom: {x:1, y:1} }, { top: {x:2, y:0}, bottom: {x:2, y:1} }, { top: {x:3, y:0}, bottom: {x:3, y:1} } ],
+            'LEFT':  [ { top: {x:0, y:6}, bottom: {x:0, y:7} }, { top: {x:1, y:6}, bottom: {x:1, y:7} }, { top: {x:2, y:6}, bottom: {x:2, y:7} }, { top: {x:3, y:6}, bottom: {x:3, y:7} } ],
+            'RIGHT': [ { top: {x:0, y:2}, bottom: {x:0, y:3} }, { top: {x:1, y:2}, bottom: {x:1, y:3} }, { top: {x:2, y:2}, bottom: {x:2, y:3} }, { top: {x:3, y:2}, bottom: {x:3, y:3} } ],
+            'UP':    [ { top: {x:0, y:4}, bottom: {x:0, y:5} }, { top: {x:1, y:4}, bottom: {x:1, y:5} }, { top: {x:2, y:4}, bottom: {x:2, y:5} }, { top: {x:3, y:4}, bottom: {x:3, y:5} } ]
+        };
+
+        let activeRipples = [];
+
+        function drawScene() {
+            if (!gameState) return;
+            simCtx.clearRect(0, 0, simCanvas.width, simCanvas.height);
+            drawWorld();
+            drawAgents();
+        }
+
+        function drawWorld() {
+            if (!gameState || !tileSheet.complete || tileSheet.naturalHeight === 0) return;
+            const env = gameState.environment;
+            const TILE_DEST_SIZE = env.tile_size;
+            
+            if (!simCanvas.background) {
+                const bgCanvas = document.createElement('canvas');
+                bgCanvas.width = simCanvas.width;
+                bgCanvas.height = simCanvas.height;
+                const bgCtx = bgCanvas.getContext('2d');
+                
+                const cols = Math.floor(simCanvas.width / TILE_DEST_SIZE);
+                const rows = Math.floor(simCanvas.height / TILE_DEST_SIZE);
+                
+                for (let r = 0; r < rows; r++) {
+                    for (let c = 0; c < cols; c++) {
+                        let tile = TILE_MAP.dirt; 
+                        if (r === 0) tile = (c === 0) ? TILE_MAP.grass_corner_tl : (c === cols - 1) ? TILE_MAP.grass_corner_tr : TILE_MAP.grass_border_t;
+                        else if (r === rows - 1) tile = (c === 0) ? TILE_MAP.grass_corner_bl : (c === cols - 1) ? TILE_MAP.grass_corner_br : TILE_MAP.grass_border_b;
+                        else if (c === 0) tile = TILE_MAP.grass_border_l;
+                        else if (c === cols - 1) tile = TILE_MAP.grass_border_r;
+                        bgCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, c * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                    }
+                }
+                simCanvas.background = bgCanvas;
+            }
+            simCtx.drawImage(simCanvas.background, 0, 0);
+
+            gameState.worlds.forEach(world => {
+                const riverStartCol = world.river_start_col;
+                const riverWaterWidth = 3;
+                const rows = Math.floor(simCanvas.height / TILE_DEST_SIZE);
+                
+                for(let r = 0; r < rows; r++){
+                    simCtx.drawImage(tileSheet, TILE_MAP.water_grass_l.x * TILE_SOURCE_SIZE, TILE_MAP.water_grass_l.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (riverStartCol) * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                    for (let c = 1; c <= riverWaterWidth; c++) {
+                         simCtx.drawImage(tileSheet, TILE_MAP.water.x * TILE_SOURCE_SIZE, TILE_MAP.water.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (riverStartCol + c) * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                    }
+                    simCtx.drawImage(tileSheet, TILE_MAP.water_grass_r.x * TILE_SOURCE_SIZE, TILE_MAP.water_grass_r.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (riverStartCol + riverWaterWidth + 1) * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                }
+                
+                if (Math.random() < 0.05) { 
+                    activeRipples.push({
+                        x: world.river_start_col + 1 + Math.floor(Math.random() * riverWaterWidth),
+                        y: Math.floor(Math.random() * rows),
+                        frame: 0,
+                        life: 0
+                    });
+                }
+
+                activeRipples.forEach((ripple, index) => {
+                    const tile = TILE_MAP.water_ripple[ripple.frame];
+                    simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, ripple.x * TILE_DEST_SIZE, ripple.y * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                    ripple.life++;
+                    if (ripple.life % 8 === 0) ripple.frame++;
+                    if(ripple.frame >= TILE_MAP.water_ripple.length) activeRipples.splice(index, 1);
+                });
+
+                for (let r = 0; r < TILE_MAP.house.length; r++) {
+                    for (let c = 0; c < TILE_MAP.house[r].length; c++) {
+                        const tile = TILE_MAP.house[r][c];
+                        simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (world.house_start_col + c) * TILE_DEST_SIZE, (world.house_start_row + r) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                    }
+                }
+                
+                if (world.placed_bridge) {
+                    for(let i = 0; i < TILE_MAP.bridge_asset.length; i++) {
+                        const tile = TILE_MAP.bridge_asset[i];
+                        simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, world.placed_bridge.x + (i * TILE_DEST_SIZE), world.placed_bridge.y, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                    }
+                }
+                
+                if (world.bridge_piece) {
+                    for(let i = 0; i < TILE_MAP.bridge_asset.length; i++) {
+                        const tile = TILE_MAP.bridge_asset[i];
+                        simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, world.bridge_piece.x + (i * TILE_DEST_SIZE), world.bridge_piece.y, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                    }
+                }
+            });
+        }
+        
+        function drawAgents() {
+            if (!gameState || !gameState.worlds || !charSheet.complete || charSheet.naturalHeight === 0) return;
+            
+            gameState.worlds.forEach(world => {
+                const agent = world.agent;
+                const TILE_DEST_SIZE = gameState.environment.tile_size;
+                const anim_frames = CHAR_SPRITE_MAP[agent.last_action];
+                if (!anim_frames) return;
+
+                const current_frame_index = Math.floor(agent.animation_frame / 4) % anim_frames.length;
+                const frame = anim_frames[current_frame_index];
+                
+                simCtx.drawImage(charSheet, frame.bottom.x * TILE_SOURCE_SIZE, frame.bottom.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.x, agent.y, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                simCtx.drawImage(charSheet, frame.top.x * TILE_SOURCE_SIZE, frame.top.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.x, agent.y - TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+            });
+        }
+
+        function drawQValueVisualization() {
+            if (!qValueData || !gameState) return;
+            const TILE_DEST_SIZE = gameState.environment.tile_size;
+            const { q_map, policy_map, rows, cols } = qValueData;
+
+            const maxQ = Math.max(...q_map.flat().filter(q => q > -1000 && q < 1000));
+            const minQ = Math.min(...q_map.flat().filter(q => q > -1000 && q < 1000));
+
+            qCtx.clearRect(0, 0, qCanvas.width, qCanvas.height);
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const q = q_map[r][c];
+                    
+                    let color = 'rgba(0,0,0,0.2)';
+                    if (q > 0) {
+                        const normQ = (q / (maxQ || 1));
+                        color = `rgba(52, 211, 153, ${normQ * 0.7})`; // Green
+                    } else if (q < 0) {
+                        const normQ = (q / (minQ || -1));
+                        color = `rgba(239, 68, 68, ${normQ * 0.6})`; // Red
+                    }
+                    
+                    qCtx.fillStyle = color;
+                    qCtx.fillRect(c * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+
+                    const policy = policy_map[r][c];
+                    drawArrow(c * TILE_DEST_SIZE, r * TILE_DEST_SIZE, policy, 'white');
+                }
+            }
+        }
+        
+        function drawArrow(x, y, dir, color) {
+            qCtx.strokeStyle = color;
+            qCtx.lineWidth = 1;
+            qCtx.beginPath();
+            const centerX = x + TILE_SOURCE_SIZE/2;
+            const centerY = y + TILE_SOURCE_SIZE/2;
+            const size = 4;
+            
+            if (dir === 'UP') { qCtx.moveTo(centerX, centerY - size); qCtx.lineTo(centerX, centerY + size); }
+            else if (dir === 'DOWN') { qCtx.moveTo(centerX, centerY + size); qCtx.lineTo(centerX, centerY - size); }
+            else if (dir === 'LEFT') { qCtx.moveTo(centerX - size, centerY); qCtx.lineTo(centerX + size, centerY); }
+            else if (dir === 'RIGHT') { qCtx.moveTo(centerX + size, centerY); qCtx.lineTo(centerX - size, centerY); }
+            
+            if (dir === 'UP') { qCtx.moveTo(centerX - 3, centerY -1); qCtx.lineTo(centerX, centerY - size); qCtx.lineTo(centerX + 3, centerY-1); }
+            else if (dir === 'DOWN') { qCtx.moveTo(centerX - 3, centerY+1); qCtx.lineTo(centerX, centerY + size); qCtx.lineTo(centerX + 3, centerY+1); }
+            else if (dir === 'LEFT') { qCtx.moveTo(centerX -1, centerY - 3); qCtx.lineTo(centerX - size, centerY); qCtx.lineTo(centerX-1, centerY + 3); }
+            else if (dir === 'RIGHT') { qCtx.moveTo(centerX+1, centerY - 3); qCtx.lineTo(centerX + size, centerY); qCtx.lineTo(centerX+1, centerY + 3); }
+            
+            qCtx.stroke();
+        }
+        
+        function updateScoreboard() {
+            if (!gameState) return;
+            episodesCompletedEl.textContent = gameState.episodes_completed;
+            const scores = gameState.episode_scores;
+            if (scores.length > 0) {
+                bestScoreEl.textContent = Math.round(Math.max(...scores));
+                worstScoreEl.textContent = Math.round(Math.min(...scores));
+                const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+                avgScoreEl.textContent = Math.round(avg);
+            } else {
+                bestScoreEl.textContent = "N/A"; worstScoreEl.textContent = "N/A"; avgScoreEl.textContent = "N/A";
+            }
+        }
+        
+        function updateMilestones() {
+            if (!gameState || !gameState.milestones) return;
+            for (const key in gameState.milestones) {
+                const el = milestoneElements[key];
+                if (el) {
+                    el.textContent = gameState.milestones[key];
+                }
+            }
+        }
+
+        function renderLoop() {
+            if (!renderLoopRunning) return;
+            if (gameState) {
+                drawScene();
+                drawQValueVisualization();
+                updateScoreboard();
+                updateMilestones();
+            }
+            requestAnimationFrame(renderLoop);
+        }
+
+        async function startOrResetSimulation() {
+            statusEl.textContent = "Status: Resetting...";
+            if (simWorker) {
+                simWorker.postMessage({ command: 'stop' });
+                simWorker.terminate();
+            }
+            if (qValueUpdateInterval) {
+                clearInterval(qValueUpdateInterval);
+            }
+            renderLoopRunning = false;
+            simCanvas.background = null;
+
+            const response = await fetch("{% url 'api_state' %}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                body: JSON.stringify({ 
+                    command: 'reset', canvasSize: { width: simCanvas.width, height: simCanvas.height }, 
+                    numAgents: agentsSlider.value, learningRate: lrSlider.value, explorationRate: erSlider.value,
+                    curiosityFactor: curiositySlider.value, timeLimitScore: timeLimitSlider.value
+                }),
+            });
+
+            if(response.ok) {
+                gameState = await response.json(); 
+                statusEl.textContent = `Status: ${gameState.worlds.length} agent(s) learning in parallel...`;
+                
+                if (!renderLoopRunning) {
+                    renderLoopRunning = true;
+                    renderLoop();
+                }
+                
+                simWorker = new Worker("{% static 'js/simulation_worker.js' %}");
+                simWorker.onmessage = function(e) {
+                    const { type, gameState: newGameState, qValueData: newQValueData, message } = e.data;
+                    if (type === 'update') {
+                        gameState = newGameState;
+                    } else if (type === 'q_values_update') {
+                        qValueData = newQValueData;
+                    }
+                    else if (type === 'error') {
+                        statusEl.textContent = `Error: ${message}`;
+                        renderLoopRunning = false;
+                        if(qValueUpdateInterval) clearInterval(qValueUpdateInterval);
+                    }
+                };
+
+                simWorker.postMessage({
+                    command: 'start',
+                    data: { apiStateUrl: "{% url 'api_state' %}", speed: parseInt(speedSlider.value) || 50 }
+                });
+                
+                qValueUpdateInterval = setInterval(() => {
+                    if (simWorker) {
+                         simWorker.postMessage({
+                            command: 'get_q_values',
+                            data: {
+                                qValueApiUrl: "{% url 'api_q_values' %}",
+                                viewState: currentViewState,
+                                csrfToken: csrfToken
+                            }
+                        });
+                    }
+                }, 250);
+
+            } else { statusEl.textContent = "Error resetting simulation."; }
+        }
+
+        function resizeAndInit() {
+            const container = document.querySelector('.canvas-container');
+            const size = Math.min(window.innerWidth * 0.6, 800);
+            simCanvas.width = qCanvas.width = size;
+            simCanvas.height = qCanvas.height = size / 2;
+            startOrResetSimulation();
+        }
+
+        resetButton.addEventListener('click', startOrResetSimulation);
+        speedSlider.addEventListener('input', (e) => { 
+            if (simWorker) {
+                simWorker.postMessage({ command: 'update_speed', data: { speed: parseInt(e.target.value) || 50 } });
+            }
+            speedValue.textContent = `${e.target.value}`;
+        });
+        
+        viewStateToggle.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                const state = e.target.dataset.state;
+                viewStateToggle.querySelector('.active').classList.remove('active');
+                e.target.classList.add('active');
+                
+                if (state === 'no_bridge') { currentViewState = { has_bridge_piece: false, bridge_placed: false, has_crossed: false }; } 
+                else if (state === 'has_bridge') { currentViewState = { has_bridge_piece: true, bridge_placed: false, has_crossed: false }; }
+                else if (state === 'bridge_placed') { currentViewState = { has_bridge_piece: false, bridge_placed: true, has_crossed: false }; }
+                else if (state === 'crossed_bridge') { currentViewState = { has_bridge_piece: false, bridge_placed: false, has_crossed: true }; }
+
+
+                if (simWorker) {
+                     simWorker.postMessage({
+                        command: 'get_q_values',
+                        data: {
+                            qValueApiUrl: "{% url 'api_q_values' %}",
+                            viewState: currentViewState,
+                            csrfToken: csrfToken
+                        }
+                    });
+                }
+            }
+        });
+        
+        agentsSlider.addEventListener('input', (e) => agentsValue.textContent = e.target.value);
+        lrSlider.addEventListener('input', (e) => lrValue.textContent = e.target.value);
+        erSlider.addEventListener('input', (e) => erValue.textContent = e.target.value);
+        curiositySlider.addEventListener('input', (e) => curiosityValue.textContent = e.target.value);
+        timeLimitSlider.addEventListener('input', (e) => timeLimitValue.textContent = e.target.value);
+        
+    </script>
+</body>
+</html>
