@@ -12,6 +12,7 @@ from .engine import SimulationEngine, RLAgent, SimulationWorld, ReplayBuffer, GR
 server_engines = {}
 
 def index(request):
+    """ Renders the main simulation page and clears any old session data. """
     if 'engine_id' in request.session and request.session['engine_id'] in server_engines:
         del server_engines[request.session['engine_id']]
     if 'engine_id' in request.session:
@@ -19,32 +20,37 @@ def index(request):
     return render(request, 'simulation/index.html')
 
 def get_or_create_engine(session, data=None):
+    """
+    Gets the user's existing simulation engine from the server cache.
+    If it doesn't exist, or if a reset is forced, it creates a new one using the optimized defaults.
+    """
     engine_id = session.get('engine_id')
     if not engine_id or engine_id not in server_engines or (data and data.get('command') == 'reset'):
         engine_id = str(uuid.uuid4())
         session['engine_id'] = engine_id
 
+        # --- UPDATED DEFAULTS to match optimized parameters ---
         actions = ["UP", "DOWN", "LEFT", "RIGHT"]
         agent_controller = RLAgent(
             actions,
-            learning_rate=float(data.get('learningRate', 0.1)),
+            learning_rate=float(data.get('learningRate', 0.5)),
             discount_factor=float(data.get('discountFactor', 0.9)),
-            exploration_rate=float(data.get('explorationRate', 0.5)),
-            buffer_size=20000 # Increased buffer for HER
+            exploration_rate=float(data.get('explorationRate', 0.6)),
+            buffer_size=20000
         )
 
         visit_count = defaultdict(int)
         milestones = { 'picked_up': 0, 'placed': 0, 'crossed': 0, 'home': 0 }
 
         engine = SimulationEngine(
-            num_agents=int(data.get('numAgents', 1)),
+            num_agents=int(data.get('numAgents', 10)),
             agent_controller=agent_controller,
             visit_count=visit_count,
             milestones=milestones,
-            curiosity_factor=float(data.get('curiosityFactor', 10)),
-            time_limit_score=int(data.get('timeLimitScore', -1000)),
+            curiosity_factor=float(data.get('curiosityFactor', 15)),
+            time_limit_score=int(data.get('timeLimitScore', -600)),
             batch_size=int(data.get('batchSize', 32)),
-            step_penalty=int(data.get('costOfLiving', 1)) # HER uses a penalty of 1
+            step_penalty=int(data.get('costOfLiving', 14))
         )
         server_engines[engine_id] = engine
 
@@ -52,6 +58,9 @@ def get_or_create_engine(session, data=None):
 
 
 def api_state(request):
+    """
+    API endpoint for the simulation. Now fully stateful on the server.
+    """
     if request.method == 'GET':
         engine_id = request.session.get('engine_id')
         if not engine_id or engine_id not in server_engines:
@@ -74,6 +83,7 @@ def api_state(request):
 
 
 def api_q_values(request):
+    """ API endpoint to fetch the Q-value maps for all visualization states. """
     if request.method != 'POST':
         return JsonResponse({'status': 'error', 'message': 'Only POST method is allowed.'}, status=405)
 
@@ -83,7 +93,6 @@ def api_q_values(request):
 
     engine = server_engines[engine_id]
     agent_controller = engine.agent_controller
-    # The true goal is defined in the world
     true_goal = engine.worlds[0].goal
 
     states_to_visualize = {
@@ -101,13 +110,11 @@ def api_q_values(request):
         for r in range(GRID_ROWS):
             q_row = []; policy_row = []
             for c in range(GRID_COLS):
-                # The agent's observable state tuple
                 agent_state = (c, r,
                                1 if state_conditions['has_bridge'] else 0,
                                1 if state_conditions['bridge_placed'] else 0,
                                1 if state_conditions['has_crossed'] else 0)
 
-                # We get the q-values for this state, conditioned on the TRUE goal
                 q_values = {a: agent_controller.get_q_value(agent_state, true_goal, a) for a in agent_controller.actions}
 
                 if not q_values or all(v == 0 for v in q_values.values()):
