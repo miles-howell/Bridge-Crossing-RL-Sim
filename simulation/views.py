@@ -6,7 +6,7 @@ from collections import defaultdict
 import uuid
 import math
 
-from .engine import SimulationEngine, RLAgent, SimulationWorld, ReplayBuffer, GRID_ROWS, GRID_COLS
+from .engine import SimulationEngine, ManagerAgent, WorkerAgent, SimulationWorld, GRID_ROWS, GRID_COLS
 
 # --- SERVER-SIDE CACHE ---
 server_engines = {}
@@ -22,33 +22,37 @@ def index(request):
 def get_or_create_engine(session, data=None):
     """
     Gets the user's existing simulation engine from the server cache.
-    If it doesn't exist, or if a reset is forced, it creates a new one using the optimized defaults.
+    If it doesn't exist, or if a reset is forced, it creates a new HRL engine.
     """
     engine_id = session.get('engine_id')
     if not engine_id or engine_id not in server_engines or (data and data.get('command') == 'reset'):
         engine_id = str(uuid.uuid4())
         session['engine_id'] = engine_id
 
-        # --- UPDATED DEFAULTS to match optimized parameters ---
-        actions = ["UP", "DOWN", "LEFT", "RIGHT"]
-        agent_controller = RLAgent(
-            actions,
-            learning_rate=float(data.get('learningRate', 0.5)),
+        manager_actions = ['GOTO_LOG', 'GOTO_RIVER', 'GOTO_HOUSE']
+        manager = ManagerAgent(
+            manager_actions,
+            learning_rate=float(data.get('learningRate', 0.1)),
             discount_factor=float(data.get('discountFactor', 0.9)),
-            exploration_rate=float(data.get('explorationRate', 0.6)),
+            exploration_rate=float(data.get('explorationRate', 0.3))
+        )
+
+        worker_actions = ["UP", "DOWN", "LEFT", "RIGHT"]
+        worker = WorkerAgent(
+            worker_actions,
+            learning_rate=float(data.get('learningRate', 0.6)),
+            discount_factor=float(data.get('discountFactor', 0.9)),
+            exploration_rate=float(data.get('explorationRate', 0.7)),
             buffer_size=20000
         )
 
-        visit_count = defaultdict(int)
         milestones = { 'picked_up': 0, 'placed': 0, 'crossed': 0, 'home': 0 }
 
         engine = SimulationEngine(
+            manager=manager,
+            worker=worker,
             num_agents=int(data.get('numAgents', 10)),
-            agent_controller=agent_controller,
-            visit_count=visit_count,
             milestones=milestones,
-            curiosity_factor=float(data.get('curiosityFactor', 15)),
-            time_limit_score=int(data.get('timeLimitScore', -600)),
             batch_size=int(data.get('batchSize', 32)),
             step_penalty=int(data.get('costOfLiving', 14))
         )
@@ -58,9 +62,7 @@ def get_or_create_engine(session, data=None):
 
 
 def api_state(request):
-    """
-    API endpoint for the simulation. Now fully stateful on the server.
-    """
+    """ API endpoint for the HRL simulation. """
     if request.method == 'GET':
         engine_id = request.session.get('engine_id')
         if not engine_id or engine_id not in server_engines:
@@ -83,7 +85,7 @@ def api_state(request):
 
 
 def api_q_values(request):
-    """ API endpoint to fetch the Q-value maps for all visualization states. """
+    """ API endpoint to fetch the Q-value maps for visualization. """
     if request.method != 'POST':
         return JsonResponse({'status': 'error', 'message': 'Only POST method is allowed.'}, status=405)
 
@@ -92,8 +94,10 @@ def api_q_values(request):
         return JsonResponse({'status': 'error', 'message': 'Brain not initialized.'}, status=400)
 
     engine = server_engines[engine_id]
-    agent_controller = engine.agent_controller
-    true_goal = engine.worlds[0].goal
+    worker = engine.worker
+
+    # --- FIX: Get subgoal locations from the engine's world template ---
+    goals_to_visualize = engine.worlds[0].subgoal_locations
 
     states_to_visualize = {
         'no_bridge':     {'has_bridge': False, 'bridge_placed': False, 'has_crossed': False},
@@ -104,25 +108,29 @@ def api_q_values(request):
 
     all_q_maps = {}
 
-    for state_name, state_conditions in states_to_visualize.items():
+    for vis_name, goal_coord in goals_to_visualize.items():
         q_map = []
-        policy_map = []
+        # Use vis_name to select the correct state context
+        state_conditions = states_to_visualize.get(vis_name.replace('GOTO_', '').lower(), {})
+
         for r in range(GRID_ROWS):
-            q_row = []; policy_row = []
+            q_row = []
             for c in range(GRID_COLS):
                 agent_state = (c, r,
-                               1 if state_conditions['has_bridge'] else 0,
-                               1 if state_conditions['bridge_placed'] else 0,
-                               1 if state_conditions['has_crossed'] else 0)
+                               1 if state_conditions.get('has_bridge') else 0,
+                               1 if state_conditions.get('bridge_placed') else 0,
+                               1 if state_conditions.get('has_crossed') else 0)
 
-                q_values = {a: agent_controller.get_q_value(agent_state, true_goal, a) for a in agent_controller.actions}
+                q_values = {a: worker.get_q_value(agent_state, goal_coord, a) for a in worker.actions}
 
                 if not q_values or all(v == 0 for v in q_values.values()):
-                    max_q = 0; best_action = 'NONE'
+                    max_q = 0
                 else:
-                    max_q = max(q_values.values()); best_action = max(q_values, key=q_values.get)
-                q_row.append(max_q); policy_row.append(best_action)
-            q_map.append(q_row); policy_map.append(policy_row)
-        all_q_maps[state_name] = {'q_map': q_map, 'policy_map': policy_map}
+                    max_q = max(q_values.values())
+                q_row.append(max_q)
+            q_map.append(q_row)
+        # Match the old visualization keys
+        vis_key = vis_name.replace('GOTO_LOG', 'no_bridge').replace('GOTO_RIVER', 'has_bridge').replace('GOTO_HOUSE', 'bridge_placed')
+        all_q_maps[vis_key] = {'q_map': q_map}
 
     return JsonResponse({ 'q_maps': all_q_maps, 'rows': GRID_ROWS, 'cols': GRID_COLS })

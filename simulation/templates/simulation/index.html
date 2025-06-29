@@ -5,7 +5,7 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta name="csrf-token" content="{{ csrf_token }}" />
-        <title>Advanced RL Simulation</title>
+        <title>Hierarchical RL Simulation</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <style>
             body {
@@ -109,15 +109,14 @@
         <div class="w-full min-h-screen flex flex-col items-center p-4">
             <div class="w-full max-w-7xl mb-6 text-center">
                 <h1 class="text-4xl font-bold text-white mb-2">
-                    Nigel's Quest: A Reinforcement Learning Adventure
+                    Nigel's Quest: A Hierarchical Learning Adventure
                 </h1>
                 <p class="text-slate-400 max-w-3xl mx-auto">
-                    This is an interactive Q-Learning simulation. The agent,
-                    Nigel, learns to navigate the world to pick up a log, build
-                    a bridge, and reach his home. Use the controls on the right
-                    to adjust the agent's learning parameters and see how it
-                    affects his behavior. The "Brain View" shows what the agent
-                    has learned for different situations.
+                    This is an interactive Hierarchical Q-Learning simulation. A
+                    high-level "Manager" agent learns the overall strategy by
+                    giving commands to a low-level "Worker" agent, which learns
+                    how to execute those commands efficiently using Hindsight
+                    Experience Replay.
                 </p>
             </div>
 
@@ -145,7 +144,7 @@
                     <div id="score-board" class="ui-box">
                         <h3 class="font-bold mb-2">Scoreboard</h3>
                         <p class="flex justify-between">
-                            <span>Episodes Completed:</span
+                            <span>Manager Steps:</span
                             ><strong id="episodesCompleted">0</strong>
                         </p>
                     </div>
@@ -169,13 +168,11 @@
                         </p>
                     </div>
                     <div id="vis-control-board" class="ui-box">
-                        <h3 class="font-bold mb-2">
-                            Brain View Layers (Goal: House)
-                        </h3>
+                        <h3 class="font-bold mb-2">Worker Brain View</h3>
                         <div id="viewStateToggles" class="vis-toggle-grid">
                             <label class="toggle-label">
                                 <input
-                                    type="checkbox"
+                                    type="radio"
                                     name="vis-toggle"
                                     value="no_bridge"
                                     checked
@@ -184,46 +181,31 @@
                                     class="toggle-color-box"
                                     style="background-color: #6ee7b7"
                                 ></span>
-                                No Bridge
+                                Goal: Log
                             </label>
                             <label class="toggle-label">
                                 <input
-                                    type="checkbox"
+                                    type="radio"
                                     name="vis-toggle"
                                     value="has_bridge"
-                                    checked
                                 />
                                 <span
                                     class="toggle-color-box"
                                     style="background-color: #60a5fa"
                                 ></span>
-                                Has Bridge
+                                Goal: River
                             </label>
                             <label class="toggle-label">
                                 <input
-                                    type="checkbox"
+                                    type="radio"
                                     name="vis-toggle"
                                     value="bridge_placed"
-                                    checked
                                 />
                                 <span
                                     class="toggle-color-box"
                                     style="background-color: #facc15"
                                 ></span>
-                                Bridge Placed
-                            </label>
-                            <label class="toggle-label">
-                                <input
-                                    type="checkbox"
-                                    name="vis-toggle"
-                                    value="crossed_bridge"
-                                    checked
-                                />
-                                <span
-                                    class="toggle-color-box"
-                                    style="background-color: #f472b6"
-                                ></span>
-                                Crossed Bridge
+                                Goal: House
                             </label>
                         </div>
                     </div>
@@ -258,7 +240,7 @@
                         </div>
                         <div class="control-group">
                             <label for="lrSlider"
-                                >Learning Rate (<span id="lrValue">0.5</span
+                                >Learning Rate (<span id="lrValue">0.6</span
                                 >)</label
                             >
                             <input
@@ -267,12 +249,12 @@
                                 min="0.01"
                                 max="1"
                                 step="0.01"
-                                value="0.5"
+                                value="0.6"
                             />
                         </div>
                         <div class="control-group">
                             <label for="erSlider"
-                                >Exploration Rate (<span id="erValue">0.6</span
+                                >Exploration Rate (<span id="erValue">0.7</span
                                 >)</label
                             >
                             <input
@@ -281,7 +263,7 @@
                                 min="0"
                                 max="1"
                                 step="0.01"
-                                value="0.6"
+                                value="0.7"
                             />
                         </div>
                         <div class="control-group">
@@ -311,36 +293,6 @@
                                 max="25"
                                 step="1"
                                 value="14"
-                            />
-                        </div>
-                        <div class="control-group">
-                            <label for="curiositySlider"
-                                >Curiosity Factor (<span id="curiosityValue"
-                                    >15</span
-                                >)</label
-                            >
-                            <input
-                                type="range"
-                                id="curiositySlider"
-                                min="0"
-                                max="50"
-                                step="1"
-                                value="15"
-                            />
-                        </div>
-                        <div class="control-group">
-                            <label for="timeLimitSlider"
-                                >Time Limit (<span id="timeLimitValue"
-                                    >-600</span
-                                >)</label
-                            >
-                            <input
-                                type="range"
-                                id="timeLimitSlider"
-                                min="-2000"
-                                max="-200"
-                                step="100"
-                                value="-600"
                             />
                         </div>
                         <div class="control-group">
@@ -384,8 +336,6 @@
                 dfSlider = document.getElementById("dfSlider"),
                 erSlider = document.getElementById("erSlider"),
                 speedSlider = document.getElementById("speedSlider"),
-                curiositySlider = document.getElementById("curiositySlider"),
-                timeLimitSlider = document.getElementById("timeLimitSlider"),
                 batchSlider = document.getElementById("batchSlider"),
                 costSlider = document.getElementById("costSlider");
             const agentsValue = document.getElementById("agentsValue"),
@@ -393,8 +343,6 @@
                 dfValue = document.getElementById("dfValue"),
                 erValue = document.getElementById("erValue"),
                 speedValue = document.getElementById("speedValue"),
-                curiosityValue = document.getElementById("curiosityValue"),
-                timeLimitValue = document.getElementById("timeLimitValue"),
                 batchValue = document.getElementById("batchValue"),
                 costValue = document.getElementById("costValue");
             const episodesCompletedEl =
@@ -731,54 +679,47 @@
             function drawQValueVisualization() {
                 if (!qValueData || !qValueData.q_maps) return;
                 const { q_maps, rows, cols } = qValueData;
-                const activeStates = Array.from(
-                    document.querySelectorAll(
-                        'input[name="vis-toggle"]:checked',
-                    ),
-                ).map((cb) => cb.value);
-                if (activeStates.length === 0) {
+                const activeState = document.querySelector(
+                    'input[name="vis-toggle"]:checked',
+                )?.value;
+                if (!activeState) {
                     qCtx.clearRect(0, 0, qCanvas.width, qCanvas.height);
                     return;
                 }
-                const allActiveQs = activeStates.flatMap((state) =>
-                    q_maps[state].q_map.flat(),
+                const currentMapData = q_maps[activeState];
+                if (!currentMapData) return;
+                const allQs = Object.values(q_maps).flatMap((mapData) =>
+                    mapData.q_map.flat(),
                 );
                 const maxQ = Math.max(
-                    ...allActiveQs.filter((q) => q > -1000 && q < 1000),
+                    ...allQs.filter((q) => q > -1000 && q < 1000),
                     0,
                 );
                 const minQ = Math.min(
-                    ...allActiveQs.filter((q) => q > -1000 && q < 1000),
+                    ...allQs.filter((q) => q > -1000 && q < 1000),
                     0,
                 );
                 qCtx.clearRect(0, 0, qCanvas.width, qCanvas.height);
                 for (let r = 0; r < rows; r++) {
                     for (let c = 0; c < cols; c++) {
-                        activeStates.forEach((stateName) => {
-                            const q = q_maps[stateName].q_map[r][c];
-                            let color, alpha;
-                            if (q > 0) {
-                                alpha = (q / (maxQ || 1)) * 0.7;
-                                color = STATE_COLORS[stateName];
-                                qCtx.fillStyle = `rgba(${color}, ${alpha})`;
-                                qCtx.fillRect(
-                                    c * TILE_DEST_SIZE,
-                                    r * TILE_DEST_SIZE,
-                                    TILE_DEST_SIZE,
-                                    TILE_DEST_SIZE,
-                                );
-                            } else if (q < 0) {
-                                alpha = (q / (minQ || -1)) * 0.6;
-                                color = STATE_COLORS.negative;
-                                qCtx.fillStyle = `rgba(${color}, ${alpha})`;
-                                qCtx.fillRect(
-                                    c * TILE_DEST_SIZE,
-                                    r * TILE_DEST_SIZE,
-                                    TILE_DEST_SIZE,
-                                    TILE_DEST_SIZE,
-                                );
-                            }
-                        });
+                        const q = currentMapData.q_map[r][c];
+                        let color;
+                        if (q > 0) {
+                            const normQ = maxQ > 0 ? q / maxQ : 0;
+                            color = `rgba(${STATE_COLORS[activeState]}, ${normQ * 0.8})`;
+                        } else if (q < 0) {
+                            const normQ = minQ < 0 ? q / minQ : 0;
+                            color = `rgba(${STATE_COLORS.negative}, ${normQ * 0.7})`;
+                        } else {
+                            continue;
+                        }
+                        qCtx.fillStyle = color;
+                        qCtx.fillRect(
+                            c * TILE_DEST_SIZE,
+                            r * TILE_DEST_SIZE,
+                            TILE_DEST_SIZE,
+                            TILE_DEST_SIZE,
+                        );
                     }
                 }
             }
@@ -842,8 +783,6 @@
                         explorationRate: erSlider.value,
                         batchSize: batchSlider.value,
                         costOfLiving: costSlider.value,
-                        curiosityFactor: curiositySlider.value,
-                        timeLimitScore: timeLimitSlider.value,
                     }),
                 });
                 if (response.ok) {
@@ -929,14 +868,6 @@
             costSlider.addEventListener(
                 "input",
                 (e) => (costValue.textContent = e.target.value),
-            );
-            curiositySlider.addEventListener(
-                "input",
-                (e) => (curiosityValue.textContent = e.target.value),
-            );
-            timeLimitSlider.addEventListener(
-                "input",
-                (e) => (timeLimitValue.textContent = e.target.value),
             );
         </script>
     </body>
