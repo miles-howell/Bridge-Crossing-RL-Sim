@@ -14,13 +14,15 @@ The application is structured as a Django web project, with core components orga
 * **`simulation_backend/`**: The root Django project, managing configurations, URL routing (`urls.py`), and settings (`settings.py`).
 * **`static/`**: Hosts static assets, notably `simulation_worker.js`, which operates as a Web Worker for asynchronous simulation updates and Q-value fetching.
 
-This architecture faces the same issue as many other hierarchical models. Training two individual, disconnected Q-tables can be unreliable when working towards a shared goal. A series of simple mistakes on the worker's part, can result in major Q-value divergence from the optpimal strategy for the manager. Ther margin for error on either of the models' parts is extremely thin. We solve for this by introducing a novel "profit-sharing" technique, reminiscent of Potential Based Reward Shaping (PBRS). The manager is rewarded for the completion of a goal or sub-goal, this reward is considered profit, hence how it knows it is doing a good job or not. The worker, who has been a loyal employee, earns a % amount of profit each step. This can be either positive or negative depending on the Q-value at that tile in the manager's Q-table. This solution solves the issue of discontinuity between the goals of the two agents. Using this method, the two agents are much better equipped to solve a complex problem together. The worker still using HER to map the entire environment, but also benefits from the major milestone rewards, subsequently "understanding" the actual goal. Previously, the worker had no way of telling why (2,9) is a good place to navigate to for example. The "profti-share" solution differs from a more basic linear sharing of the milestone rewards, which could possibly result in exploding Q-table values and inconsistent learning behavior.
+This architecture faces the same issue as many other hierarchical models. Training two individual, disconnected Q-tables can be unreliable when working towards a shared goal. A series of simple mistakes on the worker's part, can result in major Q-value divergence from the optpimal strategy for the manager, even if an optimal strategy has already been developed. The margin for error on either of the models' parts is extremely thin with this setup. 
+We solve for this by introducing a novel "profit-sharing" technique, reminiscent of Potential Based Reward Shaping (PBRS). The manager is rewarded for the completion of a goal or sub-goal, this reward is considered profit, hence how it knows it is doing a good job or not. The worker, who has been a loyal employee, earns a % amount of profit each step. This can be either positive or negative depending on the Q-value at that tile in the manager's Q-table. This solution solves the issue of discontinuity between the goals of the two agents. 
+Using this method, the two agents are much better equipped to solve a complex problem together. The worker still using HER to map the entire environment, but also benefits from the major milestone rewards, subsequently "understanding" the actual goal. Previously, the worker had no way of telling why (2,9) is a good place to navigate to for example. The "profti-share" solution differs from a more basic linear sharing of the milestone rewards, which could possibly result in exploding Q-table values and inconsistent learning behavior.
 
 ### 2. Reinforcement Learning Implementation Details
 
 #### 2.1 Agent Architecture
 
-* **Manager Agent (`ManagerAgent`)**: This high-level agent learns a policy for selecting abstract sub-goals. Its state space (`_get_manager_state`) is a tuple reflecting the agent's global progress: `(has_bridge_piece, placed_bridge, has_crossed)`. The action space consists of predefined sub-goals: 'GOTO\_LOG', 'GOTO\_RIVER', and 'GOTO\_HOUSE'.
+* **Manager Agent (`ManagerAgent`)**: This high-level agent learns a policy for selecting abstract sub-goals. Its state space (`_get_manager_state`) is a tuple reflecting the agent's global progress: `(has_bridge_piece, placed_bridge, has_crossed)`. The action space consists of predefined sub-goals: 'GOTO_LOG', 'GOTO_RIVER', 'GOTO_FAR_BANK', and 'GOTO_HOUSE'.
 * **Worker Agent (`WorkerAgent`)**: This low-level agent is responsible for executing specific sub-goals provided by the Manager. Its state space (`_get_worker_state`) includes the agent's current coordinates (`ax`, `ay`) and the same global progress flags as the Manager. The action space comprises primitive movement actions: 'UP', 'DOWN', 'LEFT', 'RIGHT'.
 
 Both agents utilize Q-learning with an epsilon-greedy policy for action selection and value iteration for Q-table updates.
@@ -76,7 +78,7 @@ To set up and run this Django application locally:
     ```bash
     python manage.py runserver
     ```
-The application will typically be accessible at `http://127.0.0.1:8000/`.
+The application will typically be accessible at `http://127.0.0.1:8000/simulation`.
 
 ### 5. Usage
 
