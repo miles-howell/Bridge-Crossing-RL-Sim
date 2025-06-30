@@ -97,6 +97,10 @@
             .toggle-label input:checked + .toggle-color-box {
                 border-color: #fff;
             }
+            #managerGraphCanvas {
+                background-color: #3d4551;
+                border: 2px solid #2b2b2b;
+            }
         </style>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -135,6 +139,10 @@
                 >
                     <canvas id="simulationCanvas"></canvas>
                     <canvas id="qValueCanvas"></canvas>
+                    <div class="ui-box">
+                         <h3 class="font-bold mb-2 text-center">Manager Policy Graph</h3>
+                         <canvas id="managerGraphCanvas" height="350"></canvas>
+                    </div>
                 </div>
 
                 <div
@@ -174,7 +182,7 @@
                                 <input
                                     type="radio"
                                     name="vis-toggle"
-                                    value="no_bridge"
+                                    value="GOTO_LOG"
                                     checked
                                 />
                                 <span
@@ -187,7 +195,7 @@
                                 <input
                                     type="radio"
                                     name="vis-toggle"
-                                    value="has_bridge"
+                                    value="GOTO_RIVER"
                                 />
                                 <span
                                     class="toggle-color-box"
@@ -199,7 +207,19 @@
                                 <input
                                     type="radio"
                                     name="vis-toggle"
-                                    value="bridge_placed"
+                                    value="GOTO_FAR_BANK"
+                                />
+                                <span
+                                    class="toggle-color-box"
+                                    style="background-color: #f472b6"
+                                ></span>
+                                Goal: Cross Bridge
+                            </label>
+                            <label class="toggle-label">
+                                <input
+                                    type="radio"
+                                    name="vis-toggle"
+                                    value="GOTO_HOUSE"
                                 />
                                 <span
                                     class="toggle-color-box"
@@ -321,11 +341,16 @@
         </div>
 
         <script>
-            // --- DOM ELEMENT REFERENCES ---
+            const API_STATE_URL = "{% url 'api_state' %}";
+            const API_Q_VALUES_URL = "{% url 'api_q_values' %}";
+            const API_MANAGER_Q_VALUES_URL = "{% url 'api_manager_q_values' %}";
+
             const simCanvas = document.getElementById("simulationCanvas"),
                 simCtx = simCanvas.getContext("2d");
             const qCanvas = document.getElementById("qValueCanvas"),
                 qCtx = qCanvas.getContext("2d");
+            const managerCanvas = document.getElementById("managerGraphCanvas"),
+                managerCtx = managerCanvas.getContext("2d");
             const csrfToken = document
                 .querySelector('meta[name="csrf-token"]')
                 .getAttribute("content");
@@ -356,12 +381,11 @@
             const viewStateToggles =
                 document.getElementById("viewStateToggles");
 
-            // --- GLOBAL STATE ---
             let gameState = null,
                 renderLoopRunning = false,
                 simWorker = null,
                 qValueData = null,
-                qValueUpdateInterval = null;
+                managerQValueData = null;
             let GRID_COLS = 20,
                 GRID_ROWS = 12,
                 TILE_DEST_SIZE = 40;
@@ -374,7 +398,7 @@
                 if (++loadedAssets === totalAssets) startOrResetSimulation();
             }
             charSheet.onload = tileSheet.onload = assetLoaded;
-            charSheet.onerror = tileSheet.onerror = () => {
+            charSheet.onerror = () => {
                 console.error("Asset failed to load.");
                 statusEl.textContent =
                     "Error: Could not load simulation assets.";
@@ -382,7 +406,6 @@
             charSheet.src = "{% static 'images/character.png' %}";
             tileSheet.src = "{% static 'images/Overworld.png' %}";
 
-            // --- SPRITE & COLOR MAPPING ---
             const TILE_SOURCE_SIZE = 16;
             const TILE_MAP = {
                 dirt: { x: 1, y: 4 },
@@ -399,67 +422,44 @@
                 water_grass_r: { x: 4, y: 7 },
                 water: { x: 3, y: 7 },
                 water_ripple: [
-                    { x: 3, y: 1 },
-                    { x: 2, y: 1 },
-                    { x: 1, y: 1 },
-                    { x: 0, y: 1 },
+                    { x: 3, y: 1 }, { x: 2, y: 1 }, { x: 1, y: 1 }, { x: 0, y: 1 },
                 ],
                 bridge_asset: [
-                    { x: 3, y: 5 },
-                    { x: 4, y: 5 },
-                    { x: 5, y: 5 },
+                    { x: 3, y: 5 }, { x: 4, y: 5 }, { x: 5, y: 5 },
                 ],
                 house: [
-                    [
-                        { x: 13, y: 5 },
-                        { x: 14, y: 5 },
-                    ],
-                    [
-                        { x: 13, y: 6 },
-                        { x: 14, y: 6 },
-                    ],
-                    [
-                        { x: 13, y: 7 },
-                        { x: 14, y: 7 },
-                    ],
+                    [{ x: 13, y: 5 }, { x: 14, y: 5 }],
+                    [{ x: 13, y: 6 }, { x: 14, y: 6 }],
+                    [{ x: 13, y: 7 }, { x: 14, y: 7 }],
                 ],
             };
             const CHAR_SPRITE_MAP = {
                 DOWN: [
-                    { top: { x: 0, y: 0 }, bottom: { x: 0, y: 1 } },
-                    { top: { x: 1, y: 0 }, bottom: { x: 1, y: 1 } },
-                    { top: { x: 2, y: 0 }, bottom: { x: 2, y: 1 } },
-                    { top: { x: 3, y: 0 }, bottom: { x: 3, y: 1 } },
+                    { top: { x: 0, y: 0 }, bottom: { x: 0, y: 1 } }, { top: { x: 1, y: 0 }, bottom: { x: 1, y: 1 } },
+                    { top: { x: 2, y: 0 }, bottom: { x: 2, y: 1 } }, { top: { x: 3, y: 0 }, bottom: { x: 3, y: 1 } },
                 ],
                 LEFT: [
-                    { top: { x: 0, y: 6 }, bottom: { x: 0, y: 7 } },
-                    { top: { x: 1, y: 6 }, bottom: { x: 1, y: 7 } },
-                    { top: { x: 2, y: 6 }, bottom: { x: 2, y: 7 } },
-                    { top: { x: 3, y: 6 }, bottom: { x: 3, y: 7 } },
+                    { top: { x: 0, y: 6 }, bottom: { x: 0, y: 7 } }, { top: { x: 1, y: 6 }, bottom: { x: 1, y: 7 } },
+                    { top: { x: 2, y: 6 }, bottom: { x: 2, y: 7 } }, { top: { x: 3, y: 6 }, bottom: { x: 3, y: 7 } },
                 ],
                 RIGHT: [
-                    { top: { x: 0, y: 2 }, bottom: { x: 0, y: 3 } },
-                    { top: { x: 1, y: 2 }, bottom: { x: 1, y: 3 } },
-                    { top: { x: 2, y: 2 }, bottom: { x: 2, y: 3 } },
-                    { top: { x: 3, y: 2 }, bottom: { x: 3, y: 3 } },
+                    { top: { x: 0, y: 2 }, bottom: { x: 0, y: 3 } }, { top: { x: 1, y: 2 }, bottom: { x: 1, y: 3 } },
+                    { top: { x: 2, y: 2 }, bottom: { x: 2, y: 3 } }, { top: { x: 3, y: 2 }, bottom: { x: 3, y: 3 } },
                 ],
                 UP: [
-                    { top: { x: 0, y: 4 }, bottom: { x: 0, y: 5 } },
-                    { top: { x: 1, y: 4 }, bottom: { x: 1, y: 5 } },
-                    { top: { x: 2, y: 4 }, bottom: { x: 2, y: 5 } },
-                    { top: { x: 3, y: 4 }, bottom: { x: 3, y: 5 } },
+                    { top: { x: 0, y: 4 }, bottom: { x: 0, y: 5 } }, { top: { x: 1, y: 4 }, bottom: { x: 1, y: 5 } },
+                    { top: { x: 2, y: 4 }, bottom: { x: 2, y: 5 } }, { top: { x: 3, y: 4 }, bottom: { x: 3, y: 5 } },
                 ],
             };
             let activeRipples = [];
             const STATE_COLORS = {
-                no_bridge: "99, 230, 157",
-                has_bridge: "96, 165, 250",
-                bridge_placed: "250, 204, 21",
-                crossed_bridge: "244, 114, 182",
+                GOTO_LOG: "99, 230, 157",
+                GOTO_RIVER: "96, 165, 250",
+                GOTO_FAR_BANK: "244, 114, 182",
+                GOTO_HOUSE: "250, 204, 21",
                 negative: "239, 68, 68",
             };
 
-            // --- DRAWING FUNCTIONS ---
             function drawScene() {
                 if (gameState) {
                     simCtx.clearRect(0, 0, simCanvas.width, simCanvas.height);
@@ -468,13 +468,7 @@
                 }
             }
             function drawWorld() {
-                if (
-                    !gameState ||
-                    !gameState.worlds ||
-                    !tileSheet.complete ||
-                    tileSheet.naturalHeight === 0
-                )
-                    return;
+                if (!gameState || !gameState.worlds || !tileSheet.complete || tileSheet.naturalHeight === 0) return;
                 if (!simCanvas.background) {
                     const bgCanvas = document.createElement("canvas");
                     bgCanvas.width = simCanvas.width;
@@ -483,34 +477,11 @@
                     for (let r = 0; r < GRID_ROWS; r++) {
                         for (let c = 0; c < GRID_COLS; c++) {
                             let tile = TILE_MAP.dirt;
-                            if (r === 0)
-                                tile =
-                                    c === 0
-                                        ? TILE_MAP.grass_corner_tl
-                                        : c === GRID_COLS - 1
-                                          ? TILE_MAP.grass_corner_tr
-                                          : TILE_MAP.grass_border_t;
-                            else if (r === GRID_ROWS - 1)
-                                tile =
-                                    c === 0
-                                        ? TILE_MAP.grass_corner_bl
-                                        : c === GRID_COLS - 1
-                                          ? TILE_MAP.grass_corner_br
-                                          : TILE_MAP.grass_border_b;
+                            if (r === 0) tile = c === 0 ? TILE_MAP.grass_corner_tl : c === GRID_COLS - 1 ? TILE_MAP.grass_corner_tr : TILE_MAP.grass_border_t;
+                            else if (r === GRID_ROWS - 1) tile = c === 0 ? TILE_MAP.grass_corner_bl : c === GRID_COLS - 1 ? TILE_MAP.grass_corner_br : TILE_MAP.grass_border_b;
                             else if (c === 0) tile = TILE_MAP.grass_border_l;
-                            else if (c === GRID_COLS - 1)
-                                tile = TILE_MAP.grass_border_r;
-                            bgCtx.drawImage(
-                                tileSheet,
-                                tile.x * TILE_SOURCE_SIZE,
-                                tile.y * TILE_SOURCE_SIZE,
-                                TILE_SOURCE_SIZE,
-                                TILE_SOURCE_SIZE,
-                                c * TILE_DEST_SIZE,
-                                r * TILE_DEST_SIZE,
-                                TILE_DEST_SIZE,
-                                TILE_DEST_SIZE,
-                            );
+                            else if (c === GRID_COLS - 1) tile = TILE_MAP.grass_border_r;
+                            bgCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, c * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                         }
                     }
                     simCanvas.background = bgCanvas;
@@ -518,187 +489,68 @@
                 simCtx.drawImage(simCanvas.background, 0, 0);
                 const firstWorld = gameState.worlds[0];
                 if (!firstWorld) return;
-                const riverStartCol = firstWorld.river_start_col,
-                    riverWaterWidth = 3;
+                const riverStartCol = firstWorld.river_start_col, riverWaterWidth = 3;
                 for (let r = 0; r < GRID_ROWS; r++) {
-                    simCtx.drawImage(
-                        tileSheet,
-                        TILE_MAP.water_grass_l.x * TILE_SOURCE_SIZE,
-                        TILE_MAP.water_grass_l.y * TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        riverStartCol * TILE_DEST_SIZE,
-                        r * TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                    );
+                    simCtx.drawImage(tileSheet, TILE_MAP.water_grass_l.x * TILE_SOURCE_SIZE, TILE_MAP.water_grass_l.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, riverStartCol * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     for (let c = 1; c <= riverWaterWidth; c++) {
-                        simCtx.drawImage(
-                            tileSheet,
-                            TILE_MAP.water.x * TILE_SOURCE_SIZE,
-                            TILE_MAP.water.y * TILE_SOURCE_SIZE,
-                            TILE_SOURCE_SIZE,
-                            TILE_SOURCE_SIZE,
-                            (riverStartCol + c) * TILE_DEST_SIZE,
-                            r * TILE_DEST_SIZE,
-                            TILE_DEST_SIZE,
-                            TILE_DEST_SIZE,
-                        );
+                        simCtx.drawImage(tileSheet, TILE_MAP.water.x * TILE_SOURCE_SIZE, TILE_MAP.water.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (riverStartCol + c) * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     }
-                    simCtx.drawImage(
-                        tileSheet,
-                        TILE_MAP.water_grass_r.x * TILE_SOURCE_SIZE,
-                        TILE_MAP.water_grass_r.y * TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        (riverStartCol + riverWaterWidth + 1) * TILE_DEST_SIZE,
-                        r * TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                    );
+                    simCtx.drawImage(tileSheet, TILE_MAP.water_grass_r.x * TILE_SOURCE_SIZE, TILE_MAP.water_grass_r.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (riverStartCol + riverWaterWidth + 1) * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                 }
-                if (Math.random() < 0.05)
-                    activeRipples.push({
-                        x:
-                            riverStartCol +
-                            1 +
-                            Math.floor(Math.random() * riverWaterWidth),
-                        y: Math.floor(Math.random() * GRID_ROWS),
-                        frame: 0,
-                        life: 0,
-                    });
+                if (Math.random() < 0.05) activeRipples.push({ x: riverStartCol + 1 + Math.floor(Math.random() * riverWaterWidth), y: Math.floor(Math.random() * GRID_ROWS), frame: 0, life: 0 });
                 activeRipples.forEach((ripple, index) => {
                     const tile = TILE_MAP.water_ripple[ripple.frame];
-                    simCtx.drawImage(
-                        tileSheet,
-                        tile.x * TILE_SOURCE_SIZE,
-                        tile.y * TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        ripple.x * TILE_DEST_SIZE,
-                        ripple.y * TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                    );
+                    simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, ripple.x * TILE_DEST_SIZE, ripple.y * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     ripple.life++;
                     if (ripple.life % 8 === 0) ripple.frame++;
-                    if (ripple.frame >= TILE_MAP.water_ripple.length)
-                        activeRipples.splice(index, 1);
+                    if (ripple.frame >= TILE_MAP.water_ripple.length) activeRipples.splice(index, 1);
                 });
                 for (let r = 0; r < TILE_MAP.house.length; r++) {
                     for (let c = 0; c < TILE_MAP.house[r].length; c++) {
                         const tile = TILE_MAP.house[r][c];
-                        simCtx.drawImage(
-                            tileSheet,
-                            tile.x * TILE_SOURCE_SIZE,
-                            tile.y * TILE_SOURCE_SIZE,
-                            TILE_SOURCE_SIZE,
-                            TILE_SOURCE_SIZE,
-                            (firstWorld.house_start_col + c) * TILE_DEST_SIZE,
-                            (firstWorld.house_start_row + r) * TILE_DEST_SIZE,
-                            TILE_DEST_SIZE,
-                            TILE_DEST_SIZE,
-                        );
+                        simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (firstWorld.house_start_col + c) * TILE_DEST_SIZE, (firstWorld.house_start_row + r) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     }
                 }
                 gameState.worlds.forEach((world) => {
                     if (world.bridge_piece) {
                         for (let i = 0; i < TILE_MAP.bridge_asset.length; i++) {
                             const tile = TILE_MAP.bridge_asset[i];
-                            simCtx.drawImage(
-                                tileSheet,
-                                tile.x * TILE_SOURCE_SIZE,
-                                tile.y * TILE_SOURCE_SIZE,
-                                TILE_SOURCE_SIZE,
-                                TILE_SOURCE_SIZE,
-                                (world.bridge_piece.ax + i) * TILE_DEST_SIZE,
-                                world.bridge_piece.ay * TILE_DEST_SIZE,
-                                TILE_DEST_SIZE,
-                                TILE_DEST_SIZE,
-                            );
+                            simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (world.bridge_piece.ax + i) * TILE_DEST_SIZE, world.bridge_piece.ay * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                         }
                     }
                     if (world.placed_bridge) {
                         for (let i = 0; i < TILE_MAP.bridge_asset.length; i++) {
                             const tile = TILE_MAP.bridge_asset[i];
-                            simCtx.drawImage(
-                                tileSheet,
-                                tile.x * TILE_SOURCE_SIZE,
-                                tile.y * TILE_SOURCE_SIZE,
-                                TILE_SOURCE_SIZE,
-                                TILE_SOURCE_SIZE,
-                                (world.placed_bridge.ax + i) * TILE_DEST_SIZE,
-                                world.placed_bridge.ay * TILE_DEST_SIZE,
-                                TILE_DEST_SIZE,
-                                TILE_DEST_SIZE,
-                            );
+                            simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (world.placed_bridge.ax + i) * TILE_DEST_SIZE, world.placed_bridge.ay * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                         }
                     }
                 });
             }
             function drawAgents() {
-                if (
-                    !gameState ||
-                    !gameState.worlds ||
-                    !charSheet.complete ||
-                    charSheet.naturalHeight === 0
-                )
-                    return;
+                if (!gameState || !gameState.worlds || !charSheet.complete || charSheet.naturalHeight === 0) return;
                 gameState.worlds.forEach((world) => {
                     const agent = world.agent;
                     const anim_frames = CHAR_SPRITE_MAP[agent.last_action];
                     if (!anim_frames) return;
-                    const current_frame_index =
-                        Math.floor(agent.animation_frame / 4) %
-                        anim_frames.length;
+                    const current_frame_index = Math.floor(agent.animation_frame / 4) % anim_frames.length;
                     const frame = anim_frames[current_frame_index];
-                    simCtx.drawImage(
-                        charSheet,
-                        frame.bottom.x * TILE_SOURCE_SIZE,
-                        frame.bottom.y * TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        agent.ax * TILE_DEST_SIZE,
-                        agent.ay * TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                    );
-                    simCtx.drawImage(
-                        charSheet,
-                        frame.top.x * TILE_SOURCE_SIZE,
-                        frame.top.y * TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        TILE_SOURCE_SIZE,
-                        agent.ax * TILE_DEST_SIZE,
-                        (agent.ay - 1) * TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                        TILE_DEST_SIZE,
-                    );
+                    simCtx.drawImage(charSheet, frame.bottom.x * TILE_SOURCE_SIZE, frame.bottom.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, agent.ay * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                    simCtx.drawImage(charSheet, frame.top.x * TILE_SOURCE_SIZE, frame.top.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                 });
             }
             function drawQValueVisualization() {
                 if (!qValueData || !qValueData.q_maps) return;
                 const { q_maps, rows, cols } = qValueData;
-                const activeState = document.querySelector(
-                    'input[name="vis-toggle"]:checked',
-                )?.value;
+                const activeState = document.querySelector('input[name="vis-toggle"]:checked')?.value;
                 if (!activeState) {
                     qCtx.clearRect(0, 0, qCanvas.width, qCanvas.height);
                     return;
                 }
                 const currentMapData = q_maps[activeState];
                 if (!currentMapData) return;
-                const allQs = Object.values(q_maps).flatMap((mapData) =>
-                    mapData.q_map.flat(),
-                );
-                const maxQ = Math.max(
-                    ...allQs.filter((q) => q > -1000 && q < 1000),
-                    0,
-                );
-                const minQ = Math.min(
-                    ...allQs.filter((q) => q > -1000 && q < 1000),
-                    0,
-                );
+                const allQs = Object.values(q_maps).flatMap((mapData) => mapData.q_map.flat());
+                const maxQ = Math.max(...allQs.filter((q) => q > -1000 && q < 1000), 0);
+                const minQ = Math.min(...allQs.filter((q) => q > -1000 && q < 1000), 0);
                 qCtx.clearRect(0, 0, qCanvas.width, qCanvas.height);
                 for (let r = 0; r < rows; r++) {
                     for (let c = 0; c < cols; c++) {
@@ -710,21 +562,154 @@
                         } else if (q < 0) {
                             const normQ = minQ < 0 ? q / minQ : 0;
                             color = `rgba(${STATE_COLORS.negative}, ${normQ * 0.7})`;
-                        } else {
-                            continue;
-                        }
+                        } else { continue; }
                         qCtx.fillStyle = color;
-                        qCtx.fillRect(
-                            c * TILE_DEST_SIZE,
-                            r * TILE_DEST_SIZE,
-                            TILE_DEST_SIZE,
-                            TILE_DEST_SIZE,
-                        );
+                        qCtx.fillRect(c * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     }
                 }
             }
+            
+            // --- MODIFIED: Updated drawManagerGraph function with new layout ---
+            function drawManagerGraph() {
+                managerCtx.clearRect(0, 0, managerCanvas.width, managerCanvas.height);
+                if (!managerQValueData || !managerQValueData.manager_q_table) return;
 
-            // --- UI UPDATE FUNCTIONS ---
+                const qTable = managerQValueData.manager_q_table;
+                const allQValues = Object.values(qTable).flatMap(actions => Object.values(actions));
+                const maxAbsQ = Math.max(...allQValues.map(q => Math.abs(q)), 1); 
+                const nodeRadius = 28;
+
+                // New 2D layout based on user sketch
+                const w = managerCanvas.width;
+                const h = managerCanvas.height;
+                const nodePositions = {
+                    'START':         { x: w * 0.20, y: h * 0.5,  label: 'Start', stateKey: '0,0,0'},
+                    'HAS_LOG':       { x: w * 0.20, y: h * 0.2,  label: 'Has Log', stateKey: '1,0,0'},
+                    'BRIDGE_PLACED': { x: w * 0.5,  y: h - 45, label: 'Bridge Placed', stateKey: '0,1,0'},
+                    'CROSSED':       { x: w * 0.80, y: h * 0.5,  label: 'Crossed', stateKey: '0,1,1'},
+                    'HOME':          { x: w * 0.80, y: h * 0.2,  label: 'Home', stateKey: null}
+                };
+                
+                const actionToNextNode = {
+                    'GOTO_LOG': 'HAS_LOG',
+                    'GOTO_RIVER': 'BRIDGE_PLACED',
+                    'GOTO_FAR_BANK': 'CROSSED',
+                    'GOTO_HOUSE': 'HOME'
+                };
+
+                // Draw all possible arrows
+                Object.values(nodePositions).forEach(startNode => {
+                    if (!startNode.stateKey) return;
+                    const stateActions = qTable[startNode.stateKey];
+                    if (!stateActions) return;
+
+                    Object.entries(stateActions).forEach(([action, qValue]) => {
+                        const endNodeKey = actionToNextNode[action];
+                        if (!endNodeKey) return;
+                        const endNode = nodePositions[endNodeKey];
+                        
+                        const normQ = qValue / maxAbsQ;
+                        const color = qValue > 0 ? `rgba(110, 231, 183, ${Math.min(1, Math.abs(normQ) * 1.5)})` : `rgba(248, 113, 113, ${Math.min(1, Math.abs(normQ) * 1.5)})`;
+                        const lineWidth = Math.max(1.5, Math.abs(normQ) * 12);
+
+                        drawArrow(managerCtx, startNode.x, startNode.y, endNode.x, endNode.y, color, lineWidth, qValue.toFixed(2), nodeRadius, w/2, h/2);
+                    });
+                });
+
+                // Draw nodes on top of arrows
+                managerCtx.font = "bold 12px Inter";
+                managerCtx.textAlign = "center";
+                managerCtx.textBaseline = "middle";
+                Object.values(nodePositions).forEach(node => {
+                    managerCtx.beginPath();
+                    managerCtx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
+                    managerCtx.fillStyle = '#2b2b2b';
+                    managerCtx.fill();
+                    managerCtx.strokeStyle = '#e0e0e0';
+                    managerCtx.lineWidth = 2;
+                    managerCtx.stroke();
+                    managerCtx.fillStyle = '#e0e0e0';
+                    managerCtx.fillText(node.label, node.x, node.y);
+                });
+            }
+
+            // --- MODIFIED: Updated drawArrow function for new layout ---
+            function drawArrow(ctx, fromx, fromy, tox, toy, color, lineWidth, text, nodeRadius = 20, canvasCenterX, canvasCenterY) {
+                ctx.save();
+                
+                if (fromx === tox && fromy === toy) { // Handle self-loops
+                    const loopRadius = nodeRadius * 0.7;
+                    // Angle from canvas center to node, to position loop outwards
+                    const angleToCenter = Math.atan2(fromy - canvasCenterY, fromx - canvasCenterX);
+                    
+                    const loopCenterX = fromx + (nodeRadius + loopRadius) * Math.cos(angleToCenter);
+                    const loopCenterY = fromy + (nodeRadius + loopRadius) * Math.sin(angleToCenter);
+
+                    ctx.beginPath();
+                    ctx.arc(loopCenterX, loopCenterY, loopRadius, 0, 2 * Math.PI);
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = lineWidth;
+                    ctx.stroke();
+                    
+                    // Arrowhead for self-loop
+                    const arrowTipAngle = angleToCenter - Math.PI * 0.9;
+                    const arrowX = loopCenterX + loopRadius * Math.cos(arrowTipAngle);
+                    const arrowY = loopCenterY + loopRadius * Math.sin(arrowTipAngle);
+                    const headlen = 8 + lineWidth * 0.3;
+                    ctx.beginPath();
+                    ctx.moveTo(arrowX, arrowY);
+                    ctx.lineTo(arrowX - headlen * Math.cos(arrowTipAngle - Math.PI / 7), arrowY - headlen * Math.sin(arrowTipAngle - Math.PI / 7));
+                    ctx.lineTo(arrowX - headlen * Math.cos(arrowTipAngle + Math.PI / 7), arrowY - headlen * Math.sin(arrowTipAngle + Math.PI / 7));
+                    ctx.closePath();
+                    ctx.fillStyle = color;
+                    ctx.fill();
+
+                    // Text for self-loop
+                    ctx.fillStyle = color;
+                    ctx.font = "bold 11px Inter";
+                    ctx.textAlign = "center";
+                    ctx.fillText(text, loopCenterX + (loopRadius + 8) * Math.cos(angleToCenter), loopCenterY + (loopRadius + 8) * Math.sin(angleToCenter));
+
+                } else { // Handle arrows between different nodes
+                    const dx = tox - fromx;
+                    const dy = toy - fromy;
+                    const angle = Math.atan2(dy, dx);
+                    
+                    const startX = fromx + nodeRadius * Math.cos(angle);
+                    const startY = fromy + nodeRadius * Math.sin(angle);
+                    const endX = tox - nodeRadius * Math.cos(angle);
+                    const endY = toy - nodeRadius * Math.sin(angle);
+
+                    const bend = 0.2; // Fixed bend amount
+                    const controlX = (startX + endX) / 2 + bend * (startY - endY);
+                    const controlY = (startY + endY) / 2 - bend * (startX - endX);
+
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = lineWidth;
+                    ctx.beginPath();
+                    ctx.moveTo(startX, startY);
+                    ctx.quadraticCurveTo(controlX, controlY, endX, endY);
+                    ctx.stroke();
+
+                    // Arrowhead that is always visible
+                    const headlen = 8 + lineWidth * 0.4;
+                    const arrowAngle = Math.atan2(endY - controlY, endX - controlX);
+                    ctx.beginPath();
+                    ctx.moveTo(endX, endY);
+                    ctx.lineTo(endX - headlen * Math.cos(arrowAngle - Math.PI / 7), endY - headlen * Math.sin(arrowAngle - Math.PI / 7));
+                    ctx.lineTo(endX - headlen * Math.cos(arrowAngle + Math.PI / 7), endY - headlen * Math.sin(arrowAngle + Math.PI / 7));
+                    ctx.closePath();
+                    ctx.fillStyle = color;
+                    ctx.fill();
+
+                    ctx.fillStyle = color;
+                    ctx.font = "bold 11px Inter";
+                    ctx.textAlign = "center";
+                    ctx.fillText(text, controlX, controlY - 10);
+                }
+                ctx.restore();
+            }
+
             function updateScoreboard() {
                 if (!gameState) return;
                 episodesCompletedEl.textContent = gameState.episodes_completed;
@@ -732,21 +717,17 @@
             function updateMilestones() {
                 if (!gameState) return;
                 for (const key in milestoneElements) {
-                    if (
-                        gameState.milestones &&
-                        gameState.milestones[key] !== undefined
-                    )
-                        milestoneElements[key].textContent =
-                            gameState.milestones[key];
+                    if (gameState.milestones && gameState.milestones[key] !== undefined)
+                        milestoneElements[key].textContent = gameState.milestones[key];
                 }
             }
 
-            // --- MAIN LOGIC ---
             function renderLoop() {
                 if (!renderLoopRunning) return;
                 if (gameState) {
                     drawScene();
                     drawQValueVisualization();
+                    drawManagerGraph();
                     updateScoreboard();
                     updateMilestones();
                 }
@@ -756,10 +737,10 @@
                 const container = document.querySelector(".canvas-container");
                 if (!container || container.clientWidth === 0) return;
                 TILE_DEST_SIZE = Math.floor(container.clientWidth / GRID_COLS);
-                const newWidth = TILE_DEST_SIZE * GRID_COLS,
-                    newHeight = TILE_DEST_SIZE * GRID_ROWS;
+                const newWidth = TILE_DEST_SIZE * GRID_COLS, newHeight = TILE_DEST_SIZE * GRID_ROWS;
                 simCanvas.width = qCanvas.width = newWidth;
                 simCanvas.height = qCanvas.height = newHeight;
+                managerCanvas.width = newWidth; 
                 simCanvas.background = null;
             }
 
@@ -767,14 +748,11 @@
                 handleResize();
                 statusEl.textContent = "Status: Resetting...";
                 if (simWorker) simWorker.postMessage({ command: "stop" });
-                if (qValueUpdateInterval) clearInterval(qValueUpdateInterval);
                 renderLoopRunning = false;
-                const response = await fetch("{% url 'api_state' %}", {
+                
+                const response = await fetch(API_STATE_URL, {
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "X-CSRFToken": csrfToken,
-                    },
+                    headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
                     body: JSON.stringify({
                         command: "reset",
                         numAgents: agentsSlider.value,
@@ -785,90 +763,59 @@
                         costOfLiving: costSlider.value,
                     }),
                 });
+
                 if (response.ok) {
                     gameState = await response.json();
                     statusEl.textContent = `Status: ${gameState.worlds.length} agent(s) learning...`;
+                    
                     if (!renderLoopRunning) {
                         renderLoopRunning = true;
                         renderLoop();
                     }
-                    simWorker = new Worker(
-                        "{% static 'js/simulation_worker.js' %}",
-                    );
+
+                    simWorker = new Worker("{% static 'js/simulation_worker.js' %}");
+                    
                     simWorker.onmessage = function (e) {
-                        const {
-                            type,
-                            gameState: newGameState,
-                            qValueData: newQValueData,
-                            message,
-                        } = e.data;
-                        if (type === "update") gameState = newGameState;
-                        else if (type === "q_values_update")
+                        const { type, message, gameState: newGameState, qValueData: newQValueData, managerQValueData: newManagerQValueData } = e.data;
+                        if (type === "update") {
+                            gameState = newGameState;
+                        } else if (type === "all_q_values_update") {
                             qValueData = newQValueData;
-                        else if (type === "error") {
+                            managerQValueData = newManagerQValueData;
+                        } else if (type === "error") {
                             statusEl.textContent = `Error: ${message}`;
                             renderLoopRunning = false;
-                            if (qValueUpdateInterval)
-                                clearInterval(qValueUpdateInterval);
+                            if (simWorker) simWorker.postMessage({command: 'stop'});
                         }
                     };
+                    
                     simWorker.postMessage({
                         command: "start",
                         data: {
-                            apiStateUrl: "{% url 'api_state' %}",
+                            apiStateUrl: API_STATE_URL,
+                            qValueApiUrl: API_Q_VALUES_URL,
+                            managerQValueApiUrl: API_MANAGER_Q_VALUES_URL,
+                            csrfToken: csrfToken,
                             speed: parseInt(speedSlider.value) || 50,
                         },
                     });
-                    qValueUpdateInterval = setInterval(() => {
-                        if (simWorker)
-                            simWorker.postMessage({
-                                command: "get_q_values",
-                                data: {
-                                    qValueApiUrl: "{% url 'api_q_values' %}",
-                                    csrfToken: csrfToken,
-                                },
-                            });
-                    }, 100);
                 } else {
                     statusEl.textContent = "Error resetting simulation.";
                 }
             }
 
-            // --- EVENT LISTENERS ---
             resetButton.addEventListener("click", startOrResetSimulation);
             window.addEventListener("resize", handleResize);
             speedSlider.addEventListener("input", (e) => {
                 speedValue.textContent = `${e.target.value}`;
-                if (simWorker)
-                    simWorker.postMessage({
-                        command: "update_speed",
-                        data: { speed: parseInt(e.target.value) || 50 },
-                    });
+                if (simWorker) simWorker.postMessage({ command: "update_speed", data: { speed: parseInt(e.target.value) || 50 } });
             });
-            agentsSlider.addEventListener(
-                "input",
-                (e) => (agentsValue.textContent = e.target.value),
-            );
-            lrSlider.addEventListener(
-                "input",
-                (e) => (lrValue.textContent = e.target.value),
-            );
-            dfSlider.addEventListener(
-                "input",
-                (e) => (dfValue.textContent = e.target.value),
-            );
-            erSlider.addEventListener(
-                "input",
-                (e) => (erValue.textContent = e.target.value),
-            );
-            batchSlider.addEventListener(
-                "input",
-                (e) => (batchValue.textContent = e.target.value),
-            );
-            costSlider.addEventListener(
-                "input",
-                (e) => (costValue.textContent = e.target.value),
-            );
+            agentsSlider.addEventListener("input", (e) => (agentsValue.textContent = e.target.value));
+            lrSlider.addEventListener("input", (e) => (lrValue.textContent = e.target.value));
+            dfSlider.addEventListener("input", (e) => (dfValue.textContent = e.target.value));
+            erSlider.addEventListener("input", (e) => (erValue.textContent = e.target.value));
+            batchSlider.addEventListener("input", (e) => (batchValue.textContent = e.target.value));
+            costSlider.addEventListener("input", (e) => (costValue.textContent = e.target.value));
         </script>
     </body>
 </html>

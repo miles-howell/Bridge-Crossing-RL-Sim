@@ -52,7 +52,7 @@ class WorkerAgent:
     def choose_action(self, state, goal):
         if random.random() < self.epsilon: return random.choice(self.actions)
         q_values = [self.get_q_value(state, goal, a) for a in self.actions]
-        max_q = max(q_values)
+        max_q = max(q_values) if q_values else 0
         return random.choice([a for a, q in zip(self.actions, q_values) if q == max_q])
 
     def update_q_table(self, state, action, reward, next_state, goal, done):
@@ -79,11 +79,11 @@ class ManagerAgent:
     def choose_action(self, state):
         if random.random() < self.epsilon: return random.choice(self.actions)
         q_values = [self.get_q_value(state, a) for a in self.actions]
-        max_q = max(q_values)
+        max_q = max(q_values) if q_values else 0
         return random.choice([a for a, q in zip(self.actions, q_values) if q == max_q])
 
     def update_q_table(self, state, action, reward, next_state):
-        best_next_q = max([self.get_q_value(next_state, a) for a in self.actions])
+        best_next_q = max([self.get_q_value(next_state, a) for a in self.actions]) if self.actions else 0
         current_q = self.get_q_value(state, action)
         new_q = current_q + self.alpha * (reward + self.gamma * best_next_q - current_q)
         self.q_table[(state, action)] = new_q
@@ -101,6 +101,7 @@ class SimulationWorld:
         self.subgoal_locations = {
             'GOTO_LOG': (2, GRID_ROWS - 3),
             'GOTO_RIVER': (self.river_start_col, self.bridge_y_pos_tiles),
+            'GOTO_FAR_BANK': (self.river_start_col + RIVER_TOTAL_WIDTH - 1, self.bridge_y_pos_tiles),
             'GOTO_HOUSE': (self.house_start_col, self.house_start_row + HOUSE_HEIGHT_TILES - 1)
         }
         self.reset()
@@ -113,6 +114,12 @@ class SimulationWorld:
         self.current_subgoal_coord = None
         self.subgoal_trajectory = []
         self.subgoal_steps = 0
+        
+        self.milestones_rewarded = {
+            'log_picked_up': False,
+            'bridge_placed': False,
+            'crossed_bridge': False
+        }
 
     def _spawn_bridge_piece(self):
         self.bridge_piece = { "ax": self.subgoal_locations['GOTO_LOG'][0], "ay": self.subgoal_locations['GOTO_LOG'][1] }
@@ -139,13 +146,16 @@ class SimulationEngine:
             agent = world.agent
             if agent['status'] != AgentState.IN_PROGRESS:
                 world.reset()
+                continue
 
             if world.current_subgoal_name is None:
                 self.manager_steps += 1
                 manager_state = self._get_manager_state(world)
                 subgoal_name = self.manager.choose_action(manager_state)
                 world.current_subgoal_name = subgoal_name
-                world.current_subgoal_coord = world.subgoal_locations[subgoal_name]
+                world.current_subgoal_coord = world.subgoal_locations.get(subgoal_name)
+                if world.current_subgoal_coord is None:
+                    continue
 
             worker_state = self._get_worker_state(world)
             worker_action = self.worker.choose_action(worker_state, world.current_subgoal_coord)
@@ -158,55 +168,76 @@ class SimulationEngine:
             agent['ax'] = max(0, min(GRID_COLS - 1, agent['ax'])); agent['ay'] = max(0, min(GRID_ROWS - 1, agent['ay']))
             world.subgoal_steps += 1
 
-            # --- FIX: DENSE REWARD CALCULATION FOR REAL TRAJECTORY ---
             reward = -self.step_penalty
-            subgoal_achieved_this_tick = False
+            current_pos = (agent['ax'], agent['ay'])
+            new_milestone_achieved = False
 
-            if not agent['has_bridge_piece'] and world.bridge_piece:
+            # --- FINAL REWARD LOGIC REFACTOR ---
+            # This logic now strictly ties the manager's reward to the achievement of a NEW milestone.
+            
+            # Check for milestone events and give one-time rewards
+            # Event: Pick up the log
+            if not world.milestones_rewarded['log_picked_up'] and world.bridge_piece:
                 log_center_x = world.bridge_piece['ax'] + 1
-                if (agent['ax'], agent['ay']) == (log_center_x, world.bridge_piece['ay']):
-                    agent['has_bridge_piece'] = True; world.bridge_piece = None; self.milestones['picked_up'] += 1; reward += 100
-                    if world.current_subgoal_name == 'GOTO_LOG': subgoal_achieved_this_tick = True
+                if current_pos == (log_center_x, world.bridge_piece['ay']):
+                    agent['has_bridge_piece'] = True; world.bridge_piece = None
+                    self.milestones['picked_up'] += 1; reward += 100
+                    world.milestones_rewarded['log_picked_up'] = True
+                    if world.current_subgoal_name == 'GOTO_LOG':
+                        new_milestone_achieved = True
 
-            if agent['has_bridge_piece'] and not world.placed_bridge:
-                if (agent['ax'], agent['ay']) == world.subgoal_locations['GOTO_RIVER']:
-                    world.placed_bridge = { "ax": world.river_start_col + RIVER_BORDER_WIDTH, "ay": world.bridge_y_pos_tiles }; agent['has_bridge_piece'] = False; self.milestones['placed'] += 1; reward += 100
-                    if world.current_subgoal_name == 'GOTO_RIVER': subgoal_achieved_this_tick = True
+            # Event: Place the bridge
+            if not world.milestones_rewarded['bridge_placed'] and agent['has_bridge_piece']:
+                if current_pos == world.subgoal_locations['GOTO_RIVER']:
+                    world.placed_bridge = { "ax": world.river_start_col + RIVER_BORDER_WIDTH, "ay": world.bridge_y_pos_tiles }
+                    agent['has_bridge_piece'] = False
+                    self.milestones['placed'] += 1; reward += 100
+                    world.milestones_rewarded['bridge_placed'] = True
+                    if world.current_subgoal_name == 'GOTO_RIVER':
+                        new_milestone_achieved = True
 
+            # Event: Cross the bridge
+            if not world.milestones_rewarded['crossed_bridge'] and world.placed_bridge:
+                if agent['ax'] >= world.river_start_col + RIVER_TOTAL_WIDTH - 1:
+                    agent['has_crossed'] = True
+                    self.milestones['crossed'] += 1; reward += 100
+                    world.milestones_rewarded['crossed_bridge'] = True
+                    if world.current_subgoal_name == 'GOTO_FAR_BANK':
+                        new_milestone_achieved = True
+
+            # Event: Reach Home (This is a terminal state, so no reward flag is needed)
+            if world.current_subgoal_name == 'GOTO_HOUSE' and agent['has_crossed'] and current_pos == world.subgoal_locations['GOTO_HOUSE']:
+                agent['status'] = AgentState.HOME
+                self.milestones['home'] += 1
+                reward += 1000
+                new_milestone_achieved = True
+
+            # Drowning is always possible
             is_in_river_area = world.river_start_col < agent['ax'] < world.river_start_col + RIVER_TOTAL_WIDTH - 1
             if is_in_river_area:
                 is_on_bridge = world.placed_bridge and world.placed_bridge['ay'] == agent['ay']
                 if not is_on_bridge: agent['status'] = AgentState.DROWNED; reward -= 1000
 
-            if world.placed_bridge and not agent['has_crossed']:
-                if agent['ax'] > world.river_start_col + RIVER_TOTAL_WIDTH - 1:
-                    agent['has_crossed'] = True; reward += 100; self.milestones['crossed'] += 1
-
-            if agent['has_crossed'] and (agent['ax'], agent['ay']) == world.subgoal_locations['GOTO_HOUSE']:
-                agent['status'] = AgentState.HOME; self.milestones['home'] += 1; reward += 1000
-                if world.current_subgoal_name == 'GOTO_HOUSE': subgoal_achieved_this_tick = True
+            # Determine if the subtask is over
+            subgoal_timed_out = (world.subgoal_steps >= WORKER_MAX_STEPS)
+            subtask_is_over = new_milestone_achieved or subgoal_timed_out or agent['status'] != AgentState.IN_PROGRESS
 
             next_worker_state = self._get_worker_state(world)
             achieved_goal = (agent['ax'], agent['ay'])
-            world.subgoal_trajectory.append((worker_state, worker_action, reward, next_worker_state, achieved_goal)) # Store DENSE reward
-
-            subgoal_timed_out = (world.subgoal_steps >= WORKER_MAX_STEPS)
-            subtask_is_over = subgoal_achieved_this_tick or subgoal_timed_out or agent['status'] != AgentState.IN_PROGRESS
+            world.subgoal_trajectory.append((worker_state, worker_action, reward, next_worker_state, achieved_goal))
 
             if subtask_is_over:
-                manager_reward = 100 if subgoal_achieved_this_tick else -100
+                # The manager is ONLY rewarded if its command led to a new milestone.
+                manager_reward = 100 if new_milestone_achieved else -100
                 manager_state = self._get_manager_state(world)
                 next_manager_state = self._get_manager_state(world)
                 self.manager.update_q_table(manager_state, world.current_subgoal_name, manager_reward, next_manager_state)
 
-                # Process worker's trajectory
-                # 1. Store REAL trajectory with DENSE rewards
                 for state, act, rew, next_s, ach_g in world.subgoal_trajectory:
-                    done = (ach_g == world.current_subgoal_coord) and subgoal_achieved_this_tick
+                    done = (ach_g == world.current_subgoal_coord) and new_milestone_achieved
                     self.worker.memory.add(state, act, rew, next_s, world.current_subgoal_coord, done)
 
-                # 2. Store IMAGINARY trajectory with SPARSE rewards
-                if not subgoal_achieved_this_tick:
+                if not new_milestone_achieved:
                     imaginary_goal = world.subgoal_trajectory[-1][4]
                     for state, act, _, next_s, ach_g in world.subgoal_trajectory:
                         h_reward = self._compute_hindsight_reward(ach_g, imaginary_goal)
@@ -215,8 +246,6 @@ class SimulationEngine:
 
                 if agent['status'] == AgentState.IN_PROGRESS:
                     world.current_subgoal_name = None; world.subgoal_steps = 0; world.subgoal_trajectory = []
-                else:
-                    world.reset()
 
             self.worker.experience_replay(self.batch_size)
 

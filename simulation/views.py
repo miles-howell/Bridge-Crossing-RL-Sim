@@ -29,7 +29,7 @@ def get_or_create_engine(session, data=None):
         engine_id = str(uuid.uuid4())
         session['engine_id'] = engine_id
 
-        manager_actions = ['GOTO_LOG', 'GOTO_RIVER', 'GOTO_HOUSE']
+        manager_actions = ['GOTO_LOG', 'GOTO_RIVER', 'GOTO_FAR_BANK', 'GOTO_HOUSE']
         manager = ManagerAgent(
             manager_actions,
             learning_rate=float(data.get('learningRate', 0.1)),
@@ -96,22 +96,20 @@ def api_q_values(request):
     engine = server_engines[engine_id]
     worker = engine.worker
 
-    # --- FIX: Get subgoal locations from the engine's world template ---
     goals_to_visualize = engine.worlds[0].subgoal_locations
 
     states_to_visualize = {
-        'no_bridge':     {'has_bridge': False, 'bridge_placed': False, 'has_crossed': False},
-        'has_bridge':    {'has_bridge': True,  'bridge_placed': False, 'has_crossed': False},
-        'bridge_placed': {'has_bridge': False, 'bridge_placed': True,  'has_crossed': False},
-        'crossed_bridge':{'has_bridge': False, 'bridge_placed': True,  'has_crossed': True},
+        'GOTO_LOG':      {'has_bridge': False, 'bridge_placed': False, 'has_crossed': False},
+        'GOTO_RIVER':    {'has_bridge': True,  'bridge_placed': False, 'has_crossed': False},
+        'GOTO_FAR_BANK': {'has_bridge': False, 'bridge_placed': True,  'has_crossed': False},
+        'GOTO_HOUSE':    {'has_bridge': False, 'bridge_placed': True,  'has_crossed': True},
     }
 
     all_q_maps = {}
 
     for vis_name, goal_coord in goals_to_visualize.items():
         q_map = []
-        # Use vis_name to select the correct state context
-        state_conditions = states_to_visualize.get(vis_name.replace('GOTO_', '').lower(), {})
+        state_conditions = states_to_visualize.get(vis_name, {})
 
         for r in range(GRID_ROWS):
             q_row = []
@@ -129,8 +127,30 @@ def api_q_values(request):
                     max_q = max(q_values.values())
                 q_row.append(max_q)
             q_map.append(q_row)
-        # Match the old visualization keys
-        vis_key = vis_name.replace('GOTO_LOG', 'no_bridge').replace('GOTO_RIVER', 'has_bridge').replace('GOTO_HOUSE', 'bridge_placed')
-        all_q_maps[vis_key] = {'q_map': q_map}
+        
+        all_q_maps[vis_name] = {'q_map': q_map}
 
     return JsonResponse({ 'q_maps': all_q_maps, 'rows': GRID_ROWS, 'cols': GRID_COLS })
+
+# --- NEW: API endpoint for Manager's Q-values ---
+def api_manager_q_values(request):
+    """ API endpoint to fetch the Manager's Q-table for visualization. """
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': 'Only POST method is allowed.'}, status=405)
+
+    engine_id = request.session.get('engine_id')
+    if not engine_id or engine_id not in server_engines:
+        return JsonResponse({'status': 'error', 'message': 'Brain not initialized.'}, status=400)
+
+    engine = server_engines[engine_id]
+    manager = engine.manager
+
+    # Serialize the Q-table into a JSON-friendly format.
+    # The key is a string representation of the state tuple, e.g., "0,1,0".
+    # The value is a dictionary of action -> q_value pairs.
+    serialized_q_table = defaultdict(dict)
+    for (state, action), q_value in manager.q_table.items():
+        state_key = ",".join(map(str, state))
+        serialized_q_table[state_key][action] = q_value
+
+    return JsonResponse({'manager_q_table': dict(serialized_q_table)})
