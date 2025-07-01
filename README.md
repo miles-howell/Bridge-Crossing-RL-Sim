@@ -2,18 +2,16 @@
 
 This repository presents a Django-based web application designed for the interactive visualization and analysis of a Hierarchical Reinforcement Learning (HRL) model. The simulation demonstrates an artificial agent's learning process in a grid-world environment, where it must acquire the capability to construct a bridge and navigate to a designated 'home' location.
 
-
+**Simulation Layout**
 ![image](https://github.com/user-attachments/assets/fd2c00bd-f776-4b1b-a042-68bc119b6c78)
 
-Simulation Layout
-
+**Worker Agent Q-table**
 ![image](https://github.com/user-attachments/assets/0efa3d90-629a-4d40-b646-2050079067c3)
 
-Worker Agent Q-table
-
+**Manager Agent Policy Distribution (Note the feedback loops hindering performance)**
 ![image](https://github.com/user-attachments/assets/538f7a5d-0167-480d-9bc6-033573eef588) 
 
-Manager Agent Policy Distribution (Note the feedback loops hindering performance)
+
 
 ### 1. Introduction and Architectural Overview
 
