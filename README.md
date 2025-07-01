@@ -29,8 +29,12 @@ The application is structured as a Django web project, with core components orga
 * **`static/`**: Hosts static assets, notably `simulation_worker.js`, which operates as a Web Worker for asynchronous simulation updates and Q-value fetching.
 
 This architecture faces the same issue as many other hierarchical models. Training two individual, disconnected Q-tables can be unreliable when working towards a shared goal. A series of simple mistakes on the worker's part, can result in major Q-value divergence from the optpimal strategy for the manager, even if an optimal strategy has already been developed. The margin for error on either of the models' parts is extremely thin with this setup. 
+
+
 We solve for this by introducing a novel "profit-sharing" technique, reminiscent of Potential Based Reward Shaping (PBRS). The manager is rewarded for the completion of a goal or sub-goal, this reward is considered profit, hence how it knows it is doing a good job or not. The worker, who has been a loyal employee, earns a % amount of profit each step. This can be either positive or negative depending on the Q-value at that tile in the manager's Q-table. This solution solves the issue of discontinuity between the goals of the two agents. 
-Using this method, the two agents are much better equipped to solve a complex problem together. The worker still using HER to map the entire environment, but also benefits from the major milestone rewards, subsequently "understanding" the actual goal. Previously, the worker had no way of telling why (2,9) is a good place to navigate to for example. The "profti-share" solution differs from a more basic linear sharing of the milestone rewards, which could possibly result in exploding Q-table values and inconsistent learning behavior.
+
+
+Using this method, the two agents are much better equipped to solve a complex problem together. The worker still uses Hindsight Experience Replay (HER) to learn navigation skills, but also benefits from the major milestone rewards, subsequently "understanding" the actual goal. For example, the worker had no way of telling why (2,9) is a good place to navigate to prior to this implementation. The "profti-share" solution differs from a more basic linear sharing of the milestone rewards, which could possibly result in exploding Q-table values and inconsistent learning behavior.
 
 ### 2. Reinforcement Learning Implementation Details
 
