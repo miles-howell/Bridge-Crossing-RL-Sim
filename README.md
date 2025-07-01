@@ -4,6 +4,7 @@ This repository presents a Django-based web application designed for the interac
 ![image](https://github.com/user-attachments/assets/fd2c00bd-f776-4b1b-a042-68bc119b6c78)
 ![image](https://github.com/user-attachments/assets/0efa3d90-629a-4d40-b646-2050079067c3)
 ![image](https://github.com/user-attachments/assets/538f7a5d-0167-480d-9bc6-033573eef588) 
+
 (Note the feedback loops hindering performance)
 
 ### 1. Introduction and Architectural Overview
