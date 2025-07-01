@@ -82,7 +82,7 @@ To set up and run this Django application locally:
     ```
 3.  **Install dependencies:**
     ```bash
-    pip install -r requirements.txt
+    pip install django
     ```
 4.  **Apply database migrations:**
     ```bash
@@ -121,7 +121,7 @@ Upon accessing the application, users can:
 
 ### 7. License
 
-This project is licensed under the MIT License.
+This project is licensed under the Apache-2.0 License.
 
 ### 8. Contributing
 
