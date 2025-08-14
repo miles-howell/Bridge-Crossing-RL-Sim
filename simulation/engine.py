@@ -1,8 +1,11 @@
 # simulation/engine.py
 
 import random
-import math
-from collections import deque, defaultdict
+from collections import deque
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
 # --- CONFIGURATION ---
 GRID_COLS = 20
@@ -40,26 +43,55 @@ class ReplayBuffer:
 
 
 class WorkerAgent:
-    """ The Worker. Learns to achieve specific coordinate sub-goals using HER. """
+    """The Worker uses a neural network to approximate Q-values for state-goal pairs."""
+
     def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1, buffer_size=20000):
-        self.actions = actions; self.alpha = learning_rate; self.gamma = discount_factor; self.epsilon = exploration_rate
-        self.q_table = defaultdict(lambda: 0.0)
+        self.actions = actions
+        self.gamma = discount_factor
+        self.epsilon = exploration_rate
         self.memory = ReplayBuffer(buffer_size)
 
+        input_dim = 7  # (ax, ay, has_bridge, bridge_placed, has_crossed, goal_x, goal_y)
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, len(actions))
+        )
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.criterion = nn.MSELoss()
+
     def get_q_value(self, state, goal, action):
-        return self.q_table.get((state, goal, action), 0.0)
+        state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
+        with torch.no_grad():
+            q_values = self.model(state_goal)[0]
+        return q_values[self.actions.index(action)].item()
 
     def choose_action(self, state, goal):
-        if random.random() < self.epsilon: return random.choice(self.actions)
-        q_values = [self.get_q_value(state, goal, a) for a in self.actions]
-        max_q = max(q_values) if q_values else 0
-        return random.choice([a for a, q in zip(self.actions, q_values) if q == max_q])
+        if random.random() < self.epsilon:
+            return random.choice(self.actions)
+        state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
+        with torch.no_grad():
+            q_values = self.model(state_goal)[0]
+        max_q = torch.max(q_values).item()
+        best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
+        return random.choice(best_actions)
 
     def update_q_table(self, state, action, reward, next_state, goal, done):
-        best_next_q = 0 if done else max([self.get_q_value(next_state, goal, a) for a in self.actions])
-        current_q = self.get_q_value(state, goal, action)
-        new_q = current_q + self.alpha * (reward + self.gamma * best_next_q - current_q)
-        self.q_table[(state, goal, action)] = new_q
+        state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
+        next_state_goal = torch.tensor([list(next_state) + list(goal)], dtype=torch.float32)
+        action_index = torch.tensor([self.actions.index(action)])
+
+        q_values = self.model(state_goal).gather(1, action_index.unsqueeze(1)).squeeze()
+        with torch.no_grad():
+            next_q = self.model(next_state_goal).max(1)[0]
+            target = torch.tensor([reward], dtype=torch.float32) + self.gamma * next_q * (1 - int(done))
+
+        loss = self.criterion(q_values, target)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
     def experience_replay(self, batch_size):
         minibatch = self.memory.sample(batch_size)
@@ -68,25 +100,63 @@ class WorkerAgent:
 
 
 class ManagerAgent:
-    """ The Manager. Learns the high-level strategy of which sub-goal to pursue. """
-    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1):
-        self.actions = actions; self.alpha = learning_rate; self.gamma = discount_factor; self.epsilon = exploration_rate
-        self.q_table = defaultdict(lambda: 0.0)
+    """High-level manager approximating Q-values with a neural network."""
+
+    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1, buffer_size=10000):
+        self.actions = actions
+        self.gamma = discount_factor
+        self.epsilon = exploration_rate
+        self.memory = ReplayBuffer(buffer_size)
+
+        input_dim = 3  # (has_bridge_piece, bridge_placed, has_crossed)
+        self.model = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, len(actions))
+        )
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.criterion = nn.MSELoss()
 
     def get_q_value(self, state, action):
-        return self.q_table.get((state, action), 0.0)
+        state_t = torch.tensor([list(state)], dtype=torch.float32)
+        with torch.no_grad():
+            q_values = self.model(state_t)[0]
+        return q_values[self.actions.index(action)].item()
 
     def choose_action(self, state):
-        if random.random() < self.epsilon: return random.choice(self.actions)
-        q_values = [self.get_q_value(state, a) for a in self.actions]
-        max_q = max(q_values) if q_values else 0
-        return random.choice([a for a, q in zip(self.actions, q_values) if q == max_q])
+        if random.random() < self.epsilon:
+            return random.choice(self.actions)
+        state_t = torch.tensor([list(state)], dtype=torch.float32)
+        with torch.no_grad():
+            q_values = self.model(state_t)[0]
+        max_q = torch.max(q_values).item()
+        best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
+        return random.choice(best_actions)
 
-    def update_q_table(self, state, action, reward, next_state):
-        best_next_q = max([self.get_q_value(next_state, a) for a in self.actions]) if self.actions else 0
-        current_q = self.get_q_value(state, action)
-        new_q = current_q + self.alpha * (reward + self.gamma * best_next_q - current_q)
-        self.q_table[(state, action)] = new_q
+    def update_q_table(self, state, action, reward, next_state, done, store=True):
+        if store:
+            self.memory.add(state, action, reward, next_state, None, done)
+
+        state_t = torch.tensor([list(state)], dtype=torch.float32)
+        next_state_t = torch.tensor([list(next_state)], dtype=torch.float32)
+        action_index = torch.tensor([self.actions.index(action)])
+
+        q_values = self.model(state_t).gather(1, action_index.unsqueeze(1)).squeeze()
+        with torch.no_grad():
+            next_q = self.model(next_state_t).max(1)[0]
+            target = torch.tensor([reward], dtype=torch.float32) + self.gamma * next_q * (1 - int(done))
+
+        loss = self.criterion(q_values, target)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+    def experience_replay(self, batch_size):
+        minibatch = self.memory.sample(batch_size)
+        for state, action, reward, next_state, _, done in minibatch:
+            self.update_q_table(state, action, reward, next_state, done, store=False)
 
 
 class SimulationWorld:
@@ -256,7 +326,8 @@ class SimulationEngine:
                 manager_reward = 100 if new_milestone_achieved else -100
                 manager_state = world.last_manager_state
                 next_manager_state = self._get_manager_state(world)
-                self.manager.update_q_table(manager_state, world.current_subgoal_name, manager_reward, next_manager_state)
+                manager_done = agent['status'] != AgentState.IN_PROGRESS
+                self.manager.update_q_table(manager_state, world.current_subgoal_name, manager_reward, next_manager_state, manager_done)
 
                 for state, act, rew, next_s, ach_g in world.subgoal_trajectory:
                     done = (
@@ -275,6 +346,7 @@ class SimulationEngine:
                     world.current_subgoal_name = None; world.subgoal_steps = 0; world.subgoal_trajectory = []
 
             self.worker.experience_replay(self.batch_size)
+            self.manager.experience_replay(self.batch_size)
 
     def get_state(self):
         return { 'worlds': [w.__dict__ for w in self.worlds], 'episodes_completed': self.manager_steps, 'milestones': self.milestones }
