@@ -244,7 +244,9 @@ class SimulationEngine:
                 self.manager.update_q_table(manager_state, world.current_subgoal_name, manager_reward, next_manager_state)
 
                 for state, act, rew, next_s, ach_g in world.subgoal_trajectory:
-                    done = (ach_g == world.current_subgoal_coord) and new_milestone_achieved
+                    done = (
+                        (ach_g == world.current_subgoal_coord) and new_milestone_achieved
+                    ) or agent['status'] != AgentState.IN_PROGRESS
                     self.worker.memory.add(state, act, rew, next_s, world.current_subgoal_coord, done)
 
                 if not new_milestone_achieved:
