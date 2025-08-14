@@ -2,11 +2,9 @@
 from django.shortcuts import render
 from django.http import JsonResponse
 import json
-from collections import defaultdict
 import uuid
-import math
 
-from .engine import SimulationEngine, ManagerAgent, WorkerAgent, SimulationWorld, GRID_ROWS, GRID_COLS
+from .engine import SimulationEngine, ManagerAgent, WorkerAgent, GRID_ROWS, GRID_COLS
 
 # --- SERVER-SIDE CACHE ---
 server_engines = {}
@@ -145,12 +143,11 @@ def api_manager_q_values(request):
     engine = server_engines[engine_id]
     manager = engine.manager
 
-    # Serialize the Q-table into a JSON-friendly format.
-    # The key is a string representation of the state tuple, e.g., "0,1,0".
-    # The value is a dictionary of action -> q_value pairs.
-    serialized_q_table = defaultdict(dict)
-    for (state, action), q_value in manager.q_table.items():
+    states = [(a, b, c) for a in (0, 1) for b in (0, 1) for c in (0, 1)]
+    serialized = {}
+    for state in states:
+        q_values = {action: manager.get_q_value(state, action) for action in manager.actions}
         state_key = ",".join(map(str, state))
-        serialized_q_table[state_key][action] = q_value
+        serialized[state_key] = q_values
 
-    return JsonResponse({'manager_q_table': dict(serialized_q_table)})
+    return JsonResponse({'manager_q_table': serialized})
