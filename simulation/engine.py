@@ -114,6 +114,13 @@ class SimulationWorld:
         self.current_subgoal_coord = None
         self.subgoal_trajectory = []
         self.subgoal_steps = 0
+
+        # Track the manager's state at the moment a subgoal is issued so we can
+        # later compute the transition when the subtask finishes. Without
+        # storing this, the manager's update would see identical pre- and
+        # post-states, preventing it from learning a useful sequence of
+        # subgoals and leading to feedback loops.
+        self.last_manager_state = None
         
         self.milestones_rewarded = {
             'log_picked_up': False,
@@ -151,6 +158,9 @@ class SimulationEngine:
             if world.current_subgoal_name is None:
                 self.manager_steps += 1
                 manager_state = self._get_manager_state(world)
+                # Remember the state before executing this subgoal so the
+                # manager can learn from the resulting state transition.
+                world.last_manager_state = manager_state
                 subgoal_name = self.manager.choose_action(manager_state)
                 world.current_subgoal_name = subgoal_name
                 world.current_subgoal_coord = world.subgoal_locations.get(subgoal_name)
@@ -229,7 +239,7 @@ class SimulationEngine:
             if subtask_is_over:
                 # The manager is ONLY rewarded if its command led to a new milestone.
                 manager_reward = 100 if new_milestone_achieved else -100
-                manager_state = self._get_manager_state(world)
+                manager_state = world.last_manager_state
                 next_manager_state = self._get_manager_state(world)
                 self.manager.update_q_table(manager_state, world.current_subgoal_name, manager_reward, next_manager_state)
 
