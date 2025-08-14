@@ -139,6 +139,11 @@ class SimulationEngine:
         self.worlds = [SimulationWorld(i) for i in range(num_agents)]
         self.manager_steps = 0
 
+        # Add a dummy action used for terminal transitions such as drowning so
+        # that river states accumulate negative value estimates.
+        if "STAY" not in self.worker.actions:
+            self.worker.actions.append("STAY")
+
     def _get_manager_state(self, world):
         return (1 if world.agent['has_bridge_piece'] else 0, 1 if world.placed_bridge else 0, 1 if world.agent['has_crossed'] else 0)
 
@@ -235,6 +240,16 @@ class SimulationEngine:
             next_worker_state = self._get_worker_state(world)
             achieved_goal = (agent['ax'], agent['ay'])
             world.subgoal_trajectory.append((worker_state, worker_action, reward, next_worker_state, achieved_goal))
+
+            # If the worker drowned, explicitly store a terminal transition from
+            # the river cell so that it learns to avoid these states in the
+            # future. A dummy "STAY" action is used to represent this terminal
+            # experience.
+            if agent['status'] == AgentState.DROWNED:
+                self.worker.memory.add(
+                    next_worker_state, "STAY", -1000, next_worker_state,
+                    world.current_subgoal_coord, True
+                )
 
             if subtask_is_over:
                 # The manager is ONLY rewarded if its command led to a new milestone.
