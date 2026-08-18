@@ -30,7 +30,7 @@ def get_or_create_engine(session, data=None):
         manager_actions = ['GOTO_LOG', 'GOTO_RIVER', 'GOTO_FAR_BANK', 'GOTO_HOUSE']
         manager = ManagerAgent(
             manager_actions,
-            learning_rate=float(data.get('learningRate', 0.1)),
+            learning_rate=float(data.get('managerLearningRate', 0.01)),
             discount_factor=float(data.get('discountFactor', 0.9)),
             exploration_rate=float(data.get('explorationRate', 0.3))
         )
@@ -38,7 +38,7 @@ def get_or_create_engine(session, data=None):
         worker_actions = ["UP", "DOWN", "LEFT", "RIGHT"]
         worker = WorkerAgent(
             worker_actions,
-            learning_rate=float(data.get('learningRate', 0.6)),
+            learning_rate=float(data.get('workerLearningRate', 0.001)),
             discount_factor=float(data.get('discountFactor', 0.9)),
             exploration_rate=float(data.get('explorationRate', 0.7)),
             buffer_size=20000
@@ -52,7 +52,7 @@ def get_or_create_engine(session, data=None):
             num_agents=int(data.get('numAgents', 10)),
             milestones=milestones,
             batch_size=int(data.get('batchSize', 32)),
-            step_penalty=int(data.get('costOfLiving', 14))
+            step_penalty=int(data.get('costOfLiving', 2))
         )
         server_engines[engine_id] = engine
 
