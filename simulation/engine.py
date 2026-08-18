@@ -1,5 +1,6 @@
 # simulation/engine.py
 
+import copy
 import random
 from collections import deque
 
@@ -45,7 +46,7 @@ class ReplayBuffer:
 class WorkerAgent:
     """The Worker uses a neural network to approximate Q-values for state-goal pairs."""
 
-    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1, buffer_size=20000):
+    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1, buffer_size=20000, target_sync_freq=500):
         self.actions = actions
         self.gamma = discount_factor
         self.epsilon = exploration_rate
@@ -61,6 +62,17 @@ class WorkerAgent:
         )
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         self.criterion = nn.MSELoss()
+
+        # A frozen copy used only to compute bootstrap targets. Without this,
+        # the same weights that are being updated right now are also used to
+        # estimate the target a moment later, which lets a single update
+        # ripple back into its own target and destabilize training.
+        self.target_model = copy.deepcopy(self.model)
+        self.target_sync_freq = target_sync_freq
+        self.train_steps = 0
+
+    def sync_target_network(self):
+        self.target_model.load_state_dict(self.model.state_dict())
 
     def get_q_value(self, state, goal, action):
         state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
@@ -85,13 +97,17 @@ class WorkerAgent:
 
         q_values = self.model(state_goal).gather(1, action_index.unsqueeze(1)).squeeze()
         with torch.no_grad():
-            next_q = self.model(next_state_goal).max(1)[0]
+            next_q = self.target_model(next_state_goal).max(1)[0]
             target = torch.tensor([reward], dtype=torch.float32) + self.gamma * next_q * (1 - int(done))
 
         loss = self.criterion(q_values, target)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+        self.train_steps += 1
+        if self.train_steps % self.target_sync_freq == 0:
+            self.sync_target_network()
 
     def experience_replay(self, batch_size):
         minibatch = self.memory.sample(batch_size)
@@ -102,7 +118,7 @@ class WorkerAgent:
 class ManagerAgent:
     """High-level manager approximating Q-values with a neural network."""
 
-    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1, buffer_size=10000):
+    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1, buffer_size=10000, target_sync_freq=500):
         self.actions = actions
         self.gamma = discount_factor
         self.epsilon = exploration_rate
@@ -118,6 +134,15 @@ class ManagerAgent:
         )
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         self.criterion = nn.MSELoss()
+
+        # See WorkerAgent: a frozen copy for bootstrap targets so an update
+        # doesn't chase a target that moves because of that same update.
+        self.target_model = copy.deepcopy(self.model)
+        self.target_sync_freq = target_sync_freq
+        self.train_steps = 0
+
+    def sync_target_network(self):
+        self.target_model.load_state_dict(self.model.state_dict())
 
     def get_q_value(self, state, action):
         state_t = torch.tensor([list(state)], dtype=torch.float32)
@@ -145,13 +170,17 @@ class ManagerAgent:
 
         q_values = self.model(state_t).gather(1, action_index.unsqueeze(1)).squeeze()
         with torch.no_grad():
-            next_q = self.model(next_state_t).max(1)[0]
+            next_q = self.target_model(next_state_t).max(1)[0]
             target = torch.tensor([reward], dtype=torch.float32) + self.gamma * next_q * (1 - int(done))
 
         loss = self.criterion(q_values, target)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+        self.train_steps += 1
+        if self.train_steps % self.target_sync_freq == 0:
+            self.sync_target_network()
 
     def experience_replay(self, batch_size):
         minibatch = self.memory.sample(batch_size)
@@ -208,11 +237,6 @@ class SimulationEngine:
         self.milestones = milestones; self.batch_size = batch_size; self.step_penalty = step_penalty
         self.worlds = [SimulationWorld(i) for i in range(num_agents)]
         self.manager_steps = 0
-
-        # Add a dummy action used for terminal transitions such as drowning so
-        # that river states accumulate negative value estimates.
-        if "STAY" not in self.worker.actions:
-            self.worker.actions.append("STAY")
 
     def _get_manager_state(self, world):
         return (1 if world.agent['has_bridge_piece'] else 0, 1 if world.placed_bridge else 0, 1 if world.agent['has_crossed'] else 0)
@@ -310,16 +334,6 @@ class SimulationEngine:
             next_worker_state = self._get_worker_state(world)
             achieved_goal = (agent['ax'], agent['ay'])
             world.subgoal_trajectory.append((worker_state, worker_action, reward, next_worker_state, achieved_goal))
-
-            # If the worker drowned, explicitly store a terminal transition from
-            # the river cell so that it learns to avoid these states in the
-            # future. A dummy "STAY" action is used to represent this terminal
-            # experience.
-            if agent['status'] == AgentState.DROWNED:
-                self.worker.memory.add(
-                    next_worker_state, "STAY", -1000, next_worker_state,
-                    world.current_subgoal_coord, True
-                )
 
             if subtask_is_over:
                 # The manager is ONLY rewarded if its command led to a new milestone.
