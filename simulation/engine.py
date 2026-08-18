@@ -25,6 +25,13 @@ HOUSE_WIDTH_TILES = 2
 HOUSE_HEIGHT_TILES = 3
 HER_K = 4
 WORKER_MAX_STEPS = 75
+GRAD_CLIP_NORM = 1.0
+# Rewards the worker for physically reaching whatever coordinate the manager
+# assigned as the current subgoal, independent of whether that directive
+# actually advanced the task. This is deliberately decoupled from the
+# manager's own reward (which IS gated on task-level correctness): the
+# worker's job is to execute directives reliably, not to judge them.
+WORKER_SUBGOAL_BONUS = 100
 
 
 class AgentState:
@@ -131,6 +138,11 @@ class WorkerAgent:
         loss = self.criterion(q_values, target)
         self.optimizer.zero_grad()
         loss.backward()
+        # Bounds the size of a single update. Without this, a single
+        # large-magnitude reward (e.g. the -1000 drowning penalty) can push
+        # enough ReLU units permanently negative in one step to collapse the
+        # network's representational capacity ("dying ReLU").
+        nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=GRAD_CLIP_NORM)
         self.optimizer.step()
 
         self._record_train_steps(len(minibatch))
@@ -221,6 +233,7 @@ class ManagerAgent:
         loss = self.criterion(q_values, target)
         self.optimizer.zero_grad()
         loss.backward()
+        nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=GRAD_CLIP_NORM)
         self.optimizer.step()
 
         self._record_train_steps(len(minibatch))
@@ -288,7 +301,11 @@ class SimulationEngine:
         return (world.agent['ax'], world.agent['ay'], 1 if world.agent['has_bridge_piece'] else 0, 1 if world.placed_bridge else 0, 1 if world.agent['has_crossed'] else 0)
 
     def _compute_hindsight_reward(self, achieved_goal, desired_goal):
-        return 0 if achieved_goal == desired_goal else -1
+        # -10 rather than the more typical HER -1: these hindsight
+        # experiences share a replay buffer, network, and MSE loss with
+        # primary experiences carrying rewards up to +-1000+, so a -1 signal
+        # is negligible by comparison and barely shapes the gradient at all.
+        return 0 if achieved_goal == desired_goal else -10
 
     def update(self):
         for world in self.worlds:
@@ -387,10 +404,15 @@ class SimulationEngine:
                 self.manager.train_step(manager_state, world.current_subgoal_name, manager_reward, next_manager_state, manager_done)
 
                 for state, act, rew, next_s, ach_g in world.subgoal_trajectory:
-                    done = (
-                        (ach_g == world.current_subgoal_coord) and new_milestone_achieved
-                    ) or agent['status'] != AgentState.IN_PROGRESS
-                    self.worker.memory.add(state, act, rew, next_s, world.current_subgoal_coord, done)
+                    # The worker is rewarded for reaching the coordinate it was
+                    # actually assigned, regardless of whether that directive
+                    # was a good one -- that judgment belongs to the manager's
+                    # reward above, not the worker's. This keeps "did I follow
+                    # orders" separate from "were the orders any good".
+                    reached_assigned_subgoal = (ach_g == world.current_subgoal_coord)
+                    worker_rew = rew + (WORKER_SUBGOAL_BONUS if reached_assigned_subgoal else 0)
+                    done = reached_assigned_subgoal or agent['status'] != AgentState.IN_PROGRESS
+                    self.worker.memory.add(state, act, worker_rew, next_s, world.current_subgoal_coord, done)
 
                 if not new_milestone_achieved:
                     imaginary_goal = world.subgoal_trajectory[-1][4]

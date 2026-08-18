@@ -259,17 +259,31 @@
                             />
                         </div>
                         <div class="control-group">
-                            <label for="lrSlider"
-                                >Learning Rate (<span id="lrValue">0.6</span
+                            <label for="workerLrSlider"
+                                >Worker Learning Rate (<span id="workerLrValue">0.001</span
                                 >)</label
                             >
                             <input
                                 type="range"
-                                id="lrSlider"
-                                min="0.01"
-                                max="1"
-                                step="0.01"
-                                value="0.6"
+                                id="workerLrSlider"
+                                min="0.0001"
+                                max="0.05"
+                                step="0.0001"
+                                value="0.001"
+                            />
+                        </div>
+                        <div class="control-group">
+                            <label for="managerLrSlider"
+                                >Manager Learning Rate (<span id="managerLrValue">0.01</span
+                                >)</label
+                            >
+                            <input
+                                type="range"
+                                id="managerLrSlider"
+                                min="0.0001"
+                                max="0.1"
+                                step="0.0001"
+                                value="0.01"
                             />
                         </div>
                         <div class="control-group">
@@ -303,7 +317,7 @@
                         </div>
                         <div class="control-group">
                             <label for="costSlider"
-                                >Step Penalty (<span id="costValue">14</span
+                                >Step Penalty (<span id="costValue">2</span
                                 >)</label
                             >
                             <input
@@ -312,7 +326,7 @@
                                 min="1"
                                 max="25"
                                 step="1"
-                                value="14"
+                                value="2"
                             />
                         </div>
                         <div class="control-group">
@@ -357,14 +371,16 @@
             const statusEl = document.getElementById("status");
             const resetButton = document.getElementById("resetButton");
             const agentsSlider = document.getElementById("agentsSlider"),
-                lrSlider = document.getElementById("lrSlider"),
+                workerLrSlider = document.getElementById("workerLrSlider"),
+                managerLrSlider = document.getElementById("managerLrSlider"),
                 dfSlider = document.getElementById("dfSlider"),
                 erSlider = document.getElementById("erSlider"),
                 speedSlider = document.getElementById("speedSlider"),
                 batchSlider = document.getElementById("batchSlider"),
                 costSlider = document.getElementById("costSlider");
             const agentsValue = document.getElementById("agentsValue"),
-                lrValue = document.getElementById("lrValue"),
+                workerLrValue = document.getElementById("workerLrValue"),
+                managerLrValue = document.getElementById("managerLrValue"),
                 dfValue = document.getElementById("dfValue"),
                 erValue = document.getElementById("erValue"),
                 speedValue = document.getElementById("speedValue"),
@@ -755,7 +771,8 @@
                     body: JSON.stringify({
                         command: "reset",
                         numAgents: agentsSlider.value,
-                        learningRate: lrSlider.value,
+                        workerLearningRate: workerLrSlider.value,
+                        managerLearningRate: managerLrSlider.value,
                         discountFactor: dfSlider.value,
                         explorationRate: erSlider.value,
                         batchSize: batchSlider.value,
@@ -810,7 +827,8 @@
                 if (simWorker) simWorker.postMessage({ command: "update_speed", data: { speed: parseInt(e.target.value) || 50 } });
             });
             agentsSlider.addEventListener("input", (e) => (agentsValue.textContent = e.target.value));
-            lrSlider.addEventListener("input", (e) => (lrValue.textContent = e.target.value));
+            workerLrSlider.addEventListener("input", (e) => (workerLrValue.textContent = e.target.value));
+            managerLrSlider.addEventListener("input", (e) => (managerLrValue.textContent = e.target.value));
             dfSlider.addEventListener("input", (e) => (dfValue.textContent = e.target.value));
             erSlider.addEventListener("input", (e) => (erValue.textContent = e.target.value));
             batchSlider.addEventListener("input", (e) => (batchValue.textContent = e.target.value));
