@@ -125,7 +125,7 @@ def api_q_values(request):
                     max_q = max(q_values.values())
                 q_row.append(max_q)
             q_map.append(q_row)
-        
+
         all_q_maps[vis_name] = {'q_map': q_map}
 
     return JsonResponse({ 'q_maps': all_q_maps, 'rows': GRID_ROWS, 'cols': GRID_COLS })

@@ -191,7 +191,7 @@ class SimulationWorld:
         # post-states, preventing it from learning a useful sequence of
         # subgoals and leading to feedback loops.
         self.last_manager_state = None
-        
+
         self.milestones_rewarded = {
             'log_picked_up': False,
             'bridge_placed': False,
@@ -259,7 +259,7 @@ class SimulationEngine:
 
             # --- FINAL REWARD LOGIC REFACTOR ---
             # This logic now strictly ties the manager's reward to the achievement of a NEW milestone.
-            
+
             # Check for milestone events and give one-time rewards
             # Event: Pick up the log
             if not world.milestones_rewarded['log_picked_up'] and world.bridge_piece:
