@@ -8,6 +8,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+# The networks here are tiny (two 64-unit hidden layers) and trained on small
+# batches, so PyTorch's default multi-threaded matmul spends more time
+# coordinating threads than the matmul itself takes. Single-threaded is
+# faster for workloads this small.
+torch.set_num_threads(1)
+
 # --- CONFIGURATION ---
 GRID_COLS = 20
 GRID_ROWS = 12
@@ -74,11 +80,25 @@ class WorkerAgent:
     def sync_target_network(self):
         self.target_model.load_state_dict(self.model.state_dict())
 
-    def get_q_value(self, state, goal, action):
-        state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
+    def _record_train_steps(self, n):
+        prev = self.train_steps
+        self.train_steps += n
+        # Compare sync-interval boundaries crossed rather than checking for an
+        # exact multiple, since a batched update can advance train_steps by
+        # more than 1 at a time and could otherwise step over the boundary.
+        if self.train_steps // self.target_sync_freq > prev // self.target_sync_freq:
+            self.sync_target_network()
+
+    def get_max_q_grid(self, goal, rows, cols, flags):
+        """Returns a rows x cols grid of the max Q-value over all actions, for
+        the given goal and fixed (has_bridge, bridge_placed, has_crossed)
+        flags, using one batched forward pass instead of one call per cell."""
+        states = [(c, r) + flags for r in range(rows) for c in range(cols)]
+        state_goal = torch.tensor([list(s) + list(goal) for s in states], dtype=torch.float32)
         with torch.no_grad():
-            q_values = self.model(state_goal)[0]
-        return q_values[self.actions.index(action)].item()
+            q_values = self.model(state_goal)
+        max_per_cell = q_values.max(dim=1).values.tolist()
+        return [max_per_cell[r * cols:(r + 1) * cols] for r in range(rows)]
 
     def choose_action(self, state, goal):
         if random.random() < self.epsilon:
@@ -90,29 +110,35 @@ class WorkerAgent:
         best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
         return random.choice(best_actions)
 
-    def update_q_table(self, state, action, reward, next_state, goal, done):
-        state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
-        next_state_goal = torch.tensor([list(next_state) + list(goal)], dtype=torch.float32)
-        action_index = torch.tensor([self.actions.index(action)])
+    def train_on_batch(self, minibatch):
+        """Runs one vectorized gradient step over a whole minibatch at once,
+        instead of one individual forward/backward/step per sample. On CPU,
+        a single batched matmul is far cheaper than looping python-side over
+        many tiny ones."""
+        states, actions, rewards, next_states, goals, dones = zip(*minibatch)
 
-        q_values = self.model(state_goal).gather(1, action_index.unsqueeze(1)).squeeze()
+        state_goal = torch.tensor([list(s) + list(g) for s, g in zip(states, goals)], dtype=torch.float32)
+        next_state_goal = torch.tensor([list(s) + list(g) for s, g in zip(next_states, goals)], dtype=torch.float32)
+        action_index = torch.tensor([self.actions.index(a) for a in actions]).unsqueeze(1)
+        reward_t = torch.tensor(rewards, dtype=torch.float32)
+        done_t = torch.tensor([float(d) for d in dones], dtype=torch.float32)
+
+        q_values = self.model(state_goal).gather(1, action_index).squeeze(1)
         with torch.no_grad():
             next_q = self.target_model(next_state_goal).max(1)[0]
-            target = torch.tensor([reward], dtype=torch.float32) + self.gamma * next_q * (1 - int(done))
+            target = reward_t + self.gamma * next_q * (1 - done_t)
 
         loss = self.criterion(q_values, target)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        self.train_steps += 1
-        if self.train_steps % self.target_sync_freq == 0:
-            self.sync_target_network()
+        self._record_train_steps(len(minibatch))
 
     def experience_replay(self, batch_size):
         minibatch = self.memory.sample(batch_size)
-        for state, action, reward, next_state, goal, done in minibatch:
-            self.update_q_table(state, action, reward, next_state, goal, done)
+        if minibatch:
+            self.train_on_batch(minibatch)
 
 
 class ManagerAgent:
@@ -144,11 +170,22 @@ class ManagerAgent:
     def sync_target_network(self):
         self.target_model.load_state_dict(self.model.state_dict())
 
-    def get_q_value(self, state, action):
-        state_t = torch.tensor([list(state)], dtype=torch.float32)
+    def _record_train_steps(self, n):
+        prev = self.train_steps
+        self.train_steps += n
+        # Compare sync-interval boundaries crossed rather than checking for an
+        # exact multiple, since a batched update can advance train_steps by
+        # more than 1 at a time and could otherwise step over the boundary.
+        if self.train_steps // self.target_sync_freq > prev // self.target_sync_freq:
+            self.sync_target_network()
+
+    def get_all_q_values(self, states):
+        """Returns a list of per-action Q-value lists, one per input state,
+        using a single batched forward pass instead of one call per state."""
+        state_t = torch.tensor([list(s) for s in states], dtype=torch.float32)
         with torch.no_grad():
-            q_values = self.model(state_t)[0]
-        return q_values[self.actions.index(action)].item()
+            q_values = self.model(state_t)
+        return q_values.tolist()
 
     def choose_action(self, state):
         if random.random() < self.epsilon:
@@ -163,29 +200,35 @@ class ManagerAgent:
     def update_q_table(self, state, action, reward, next_state, done, store=True):
         if store:
             self.memory.add(state, action, reward, next_state, None, done)
+        self.train_on_batch([(state, action, reward, next_state, done)])
 
-        state_t = torch.tensor([list(state)], dtype=torch.float32)
-        next_state_t = torch.tensor([list(next_state)], dtype=torch.float32)
-        action_index = torch.tensor([self.actions.index(action)])
+    def train_on_batch(self, minibatch):
+        """Runs one vectorized gradient step over a whole minibatch at once,
+        instead of one individual forward/backward/step per sample."""
+        states, actions, rewards, next_states, dones = zip(*minibatch)
 
-        q_values = self.model(state_t).gather(1, action_index.unsqueeze(1)).squeeze()
+        state_t = torch.tensor([list(s) for s in states], dtype=torch.float32)
+        next_state_t = torch.tensor([list(s) for s in next_states], dtype=torch.float32)
+        action_index = torch.tensor([self.actions.index(a) for a in actions]).unsqueeze(1)
+        reward_t = torch.tensor(rewards, dtype=torch.float32)
+        done_t = torch.tensor([float(d) for d in dones], dtype=torch.float32)
+
+        q_values = self.model(state_t).gather(1, action_index).squeeze(1)
         with torch.no_grad():
             next_q = self.target_model(next_state_t).max(1)[0]
-            target = torch.tensor([reward], dtype=torch.float32) + self.gamma * next_q * (1 - int(done))
+            target = reward_t + self.gamma * next_q * (1 - done_t)
 
         loss = self.criterion(q_values, target)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        self.train_steps += 1
-        if self.train_steps % self.target_sync_freq == 0:
-            self.sync_target_network()
+        self._record_train_steps(len(minibatch))
 
     def experience_replay(self, batch_size):
         minibatch = self.memory.sample(batch_size)
-        for state, action, reward, next_state, _, done in minibatch:
-            self.update_q_table(state, action, reward, next_state, done, store=False)
+        if minibatch:
+            self.train_on_batch([(s, a, r, ns, d) for s, a, r, ns, _, d in minibatch])
 
 
 class SimulationWorld:
@@ -363,4 +406,34 @@ class SimulationEngine:
             self.manager.experience_replay(self.batch_size)
 
     def get_state(self):
-        return { 'worlds': [w.__dict__ for w in self.worlds], 'episodes_completed': self.manager_steps, 'milestones': self.milestones }
+        # Only include what the frontend actually renders: agent position/
+        # animation and the two bridge objects. Everything else on
+        # SimulationWorld (subgoal_trajectory, milestones_rewarded, etc.) is
+        # internal training bookkeeping the client never reads, and
+        # subgoal_trajectory in particular grows every tick during a subgoal
+        # attempt, so shipping it made the response balloon in size for no
+        # reason. river_start_col/house_start_col/house_start_row are
+        # identical across every world (derived from fixed grid constants),
+        # so they're sent once at the top level instead of duplicated per world.
+        worlds = [
+            {
+                'agent': {
+                    'ax': w.agent['ax'],
+                    'ay': w.agent['ay'],
+                    'last_action': w.agent.get('last_action'),
+                    'animation_frame': w.agent['animation_frame'],
+                },
+                'bridge_piece': w.bridge_piece,
+                'placed_bridge': w.placed_bridge,
+            }
+            for w in self.worlds
+        ]
+        first_world = self.worlds[0]
+        return {
+            'worlds': worlds,
+            'episodes_completed': self.manager_steps,
+            'milestones': self.milestones,
+            'river_start_col': first_world.river_start_col,
+            'house_start_col': first_world.house_start_col,
+            'house_start_row': first_world.house_start_row,
+        }

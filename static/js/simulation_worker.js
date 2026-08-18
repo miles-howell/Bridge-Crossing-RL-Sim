@@ -1,11 +1,19 @@
 // This script runs in the background, separate from the main page UI.
 
 let trainingInterval = null;
-let qValueInterval = null;
 let apiStateUrl = '';
 let qValueApiUrl = '';
 let managerQValueApiUrl = '';
 let csrfToken = '';
+let tickCount = 0;
+
+// Q-value heatmaps only change gradually (a handful of gradient steps
+// between polls), so refetching them is tied to how many training ticks
+// have actually happened rather than a fixed wall-clock timer. This makes
+// the heatmap refresh rate scale with the sim-speed slider automatically,
+// instead of polling at a rate that's independent of - and can outrun -
+// how fast the simulation is actually progressing.
+const QVALUE_FETCH_TICK_INTERVAL = 10;
 
 /**
  * The main loop that drives the simulation training by fetching state from the server.
@@ -22,6 +30,11 @@ async function trainingTick() {
         }
         const gameState = await response.json();
         self.postMessage({ type: 'update', gameState: gameState });
+
+        tickCount++;
+        if (tickCount % QVALUE_FETCH_TICK_INTERVAL === 0) {
+            fetchAllQValues();
+        }
     } catch (error) {
         self.postMessage({ type: 'error', message: `Network error during training tick: ${error.message}` });
         clearInterval(trainingInterval);
@@ -51,6 +64,27 @@ async function fetchApi(apiUrl, token) {
 }
 
 /**
+ * Fetches both the worker's and manager's Q-value maps and posts them
+ * together as a single update.
+ */
+function fetchAllQValues() {
+    Promise.all([
+        fetchApi(qValueApiUrl, csrfToken),
+        fetchApi(managerQValueApiUrl, csrfToken)
+    ]).then(([workerData, managerData]) => {
+        // On success, post a single message with both payloads
+        self.postMessage({
+            type: 'all_q_values_update',
+            qValueData: workerData,
+            managerQValueData: managerData,
+        });
+    }).catch(error => {
+        // On failure, post a detailed error message to the UI
+        self.postMessage({ type: 'error', message: `Q-Value Fetch Failed: ${error.message}` });
+    });
+}
+
+/**
  * Listens for messages from the main page to control the simulation.
  */
 self.onmessage = function(e) {
@@ -64,35 +98,17 @@ self.onmessage = function(e) {
         csrfToken = data.csrfToken;
         let speed = data.speed;
 
-        // Clear any old intervals to prevent duplicates
+        // Clear any old interval to prevent duplicates
         if (trainingInterval) clearInterval(trainingInterval);
-        if (qValueInterval) clearInterval(qValueInterval);
+        tickCount = 0;
 
-        // Start the training tick interval
+        // Start the training tick loop
         trainingTick(); // Initial fetch
         trainingInterval = setInterval(trainingTick, speed);
 
-        // A function to fetch both sets of Q-values
-        const fetchAllQValues = () => {
-             Promise.all([
-                fetchApi(qValueApiUrl, csrfToken),
-                fetchApi(managerQValueApiUrl, csrfToken)
-            ]).then(([workerData, managerData]) => {
-                // On success, post a single message with both payloads
-                self.postMessage({
-                    type: 'all_q_values_update',
-                    qValueData: workerData,
-                    managerQValueData: managerData,
-                });
-            }).catch(error => {
-                // On failure, post a detailed error message to the UI
-                self.postMessage({ type: 'error', message: `Q-Value Fetch Failed: ${error.message}` });
-            });
-        };
-        
-        // Start the Q-value fetching interval
-        fetchAllQValues(); // Initial fetch
-        qValueInterval = setInterval(fetchAllQValues, 200);
+        // Populate the heatmaps immediately rather than waiting for the
+        // first QVALUE_FETCH_TICK_INTERVAL ticks to elapse.
+        fetchAllQValues();
 
     } else if (command === 'update_speed') {
         let speed = data.speed;
@@ -102,10 +118,8 @@ self.onmessage = function(e) {
             trainingInterval = setInterval(trainingTick, speed);
         }
     } else if (command === 'stop') {
-        // Clear all intervals when the simulation is stopped
+        // Clear the interval when the simulation is stopped
         if (trainingInterval) clearInterval(trainingInterval);
-        if (qValueInterval) clearInterval(qValueInterval);
         trainingInterval = null;
-        qValueInterval = null;
     }
 };
