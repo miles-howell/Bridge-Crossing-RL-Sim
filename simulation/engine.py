@@ -254,7 +254,12 @@ class SimulationWorld:
         self.bridge_y_pos_tiles = GRID_ROWS // 2
 
         self.subgoal_locations = {
-            'GOTO_LOG': (2, GRID_ROWS - 3),
+            # The log's sprite is BRIDGE_LENGTH_TILES (3) wide; this is its
+            # center tile, which is also where pickup actually triggers (see
+            # _spawn_bridge_piece) -- keeping them identical means the coord
+            # the manager assigns as a goal is the same one that fires the
+            # milestone, instead of two coordinates one tile apart.
+            'GOTO_LOG': (3, GRID_ROWS - 3),
             'GOTO_RIVER': (self.river_start_col, self.bridge_y_pos_tiles),
             'GOTO_FAR_BANK': (self.river_start_col + RIVER_TOTAL_WIDTH - 1, self.bridge_y_pos_tiles),
             'GOTO_HOUSE': (self.house_start_col, self.house_start_row + HOUSE_HEIGHT_TILES - 1)
@@ -284,7 +289,11 @@ class SimulationWorld:
         }
 
     def _spawn_bridge_piece(self):
-        self.bridge_piece = { "ax": self.subgoal_locations['GOTO_LOG'][0], "ay": self.subgoal_locations['GOTO_LOG'][1] }
+        # Sprite is 3 tiles wide (see TILE_MAP.bridge_asset in index.html);
+        # spawn its left edge one tile before GOTO_LOG so GOTO_LOG lands on
+        # the sprite's center tile, unchanged from the original layout.
+        log_x, log_y = self.subgoal_locations['GOTO_LOG']
+        self.bridge_piece = { "ax": log_x - 1, "ay": log_y }
 
 
 class SimulationEngine:
@@ -347,8 +356,7 @@ class SimulationEngine:
             # Check for milestone events and give one-time rewards
             # Event: Pick up the log
             if not world.milestones_rewarded['log_picked_up'] and world.bridge_piece:
-                log_center_x = world.bridge_piece['ax'] + 1
-                if current_pos == (log_center_x, world.bridge_piece['ay']):
+                if current_pos == world.subgoal_locations['GOTO_LOG']:
                     agent['has_bridge_piece'] = True; world.bridge_piece = None
                     self.milestones['picked_up'] += 1; reward += 100
                     world.milestones_rewarded['log_picked_up'] = True
@@ -367,7 +375,11 @@ class SimulationEngine:
 
             # Event: Cross the bridge
             if not world.milestones_rewarded['crossed_bridge'] and world.placed_bridge:
-                if agent['ax'] >= world.river_start_col + RIVER_TOTAL_WIDTH - 1:
+                # Row-agnostic on purpose: the interior river columns are only
+                # safe at bridge_y_pos_tiles (see the drowning check below),
+                # so reaching this column at all implies the crossing already
+                # happened via the bridge. Same x threshold as GOTO_FAR_BANK.
+                if agent['ax'] >= world.subgoal_locations['GOTO_FAR_BANK'][0]:
                     agent['has_crossed'] = True
                     self.milestones['crossed'] += 1; reward += 100
                     world.milestones_rewarded['crossed_bridge'] = True
