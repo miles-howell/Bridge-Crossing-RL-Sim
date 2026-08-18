@@ -571,10 +571,10 @@
             // --- MODIFIED: Updated drawManagerGraph function with new layout ---
             function drawManagerGraph() {
                 managerCtx.clearRect(0, 0, managerCanvas.width, managerCanvas.height);
-                if (!managerQValueData || !managerQValueData.manager_q_table) return;
+                if (!managerQValueData || !managerQValueData.manager_q_values) return;
 
-                const qTable = managerQValueData.manager_q_table;
-                const allQValues = Object.values(qTable).flatMap(actions => Object.values(actions));
+                const managerQValues = managerQValueData.manager_q_values;
+                const allQValues = Object.values(managerQValues).flatMap(actions => Object.values(actions));
                 const maxAbsQ = Math.max(...allQValues.map(q => Math.abs(q)), 1); 
                 const nodeRadius = 28;
 
@@ -599,7 +599,7 @@
                 // Draw all possible arrows
                 Object.values(nodePositions).forEach(startNode => {
                     if (!startNode.stateKey) return;
-                    const stateActions = qTable[startNode.stateKey];
+                    const stateActions = managerQValues[startNode.stateKey];
                     if (!stateActions) return;
 
                     Object.entries(stateActions).forEach(([action, qValue]) => {

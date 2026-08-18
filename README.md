@@ -6,7 +6,7 @@ This repository presents a Django-based web application designed for the interac
 
 ![image](https://github.com/user-attachments/assets/fd2c00bd-f776-4b1b-a042-68bc119b6c78)
 
-**Worker Agent Q-table**
+**Worker Agent Q-value Map**
 
 ![image](https://github.com/user-attachments/assets/0efa3d90-629a-4d40-b646-2050079067c3)
 
@@ -28,13 +28,13 @@ The application is structured as a Django web project, with core components orga
 * **`simulation_backend/`**: The root Django project, managing configurations, URL routing (`urls.py`), and settings (`settings.py`).
 * **`static/`**: Hosts static assets, notably `simulation_worker.js`, which operates as a Web Worker for asynchronous simulation updates and Q-value fetching.
 
-This architecture faces the same issue as many other hierarchical models. Training two individual, disconnected Q-tables can be unreliable when working towards a shared goal. A series of simple mistakes on the worker's part, can result in major Q-value divergence from the optpimal strategy for the manager, even if an optimal strategy has already been developed. The margin for error on either of the models' parts is extremely thin with this setup. 
+This architecture faces the same issue as many other hierarchical models. Training two individual, disconnected Q-value estimators can be unreliable when working towards a shared goal. A series of simple mistakes on the worker's part, can result in major Q-value divergence from the optpimal strategy for the manager, even if an optimal strategy has already been developed. The margin for error on either of the models' parts is extremely thin with this setup. 
 
 
-We solve for this by implementing a "profit-sharing" technique, reminiscent of Potential Based Reward Shaping (PBRS). The manager is rewarded when an issued command results in a positive change in the environment's state (Manager issues "GOTO_LOG" command, environment state updates to "HAS_LOG", Manager is rewarded). For the sake of analogy, this reward is considered profit, hence how it knows it is doing a good job or not. The worker, who has been a loyal employee, earns a % amount of profit each step. This can be either positive or negative depending on the Q-value at that coordinate in the manager's Q-table. This solution solves the discrepency of the two agent's goals.
+We solve for this by implementing a "profit-sharing" technique, reminiscent of Potential Based Reward Shaping (PBRS). The manager is rewarded when an issued command results in a positive change in the environment's state (Manager issues "GOTO_LOG" command, environment state updates to "HAS_LOG", Manager is rewarded). For the sake of analogy, this reward is considered profit, hence how it knows it is doing a good job or not. The worker, who has been a loyal employee, earns a % amount of profit each step. This can be either positive or negative depending on the Q-value the manager currently estimates for that outcome. This solution solves the discrepency of the two agent's goals.
 
 
-Using this method, the two agents are much better equipped to solve a complex problem together. The worker still uses Hindsight Experience Replay (HER) to learn navigation skills, but also benefits from the major milestone rewards, subsequently "understanding" the actual goal. For example, the worker had no way of telling why (2,9) is a good place to navigate to prior to this implementation. The "profti-share" solution differs from a more basic linear sharing of the milestone rewards, which could possibly result in exploding Q-table values and inconsistent learning behavior. This subtle signal seems to be enough to guide the worker in the right direction.
+Using this method, the two agents are much better equipped to solve a complex problem together. The worker still uses Hindsight Experience Replay (HER) to learn navigation skills, but also benefits from the major milestone rewards, subsequently "understanding" the actual goal. For example, the worker had no way of telling why (2,9) is a good place to navigate to prior to this implementation. The "profti-share" solution differs from a more basic linear sharing of the milestone rewards, which could possibly result in exploding Q-value estimates and inconsistent learning behavior. This subtle signal seems to be enough to guide the worker in the right direction.
 
 ### 2. Reinforcement Learning Implementation Details
 
@@ -43,7 +43,7 @@ Using this method, the two agents are much better equipped to solve a complex pr
 * **Manager Agent (`ManagerAgent`)**: This high-level agent learns a policy for selecting abstract sub-goals. Its state space (`_get_manager_state`) is a tuple reflecting the agent's global progress: `(has_bridge_piece, placed_bridge, has_crossed)`. The action space consists of predefined sub-goals: 'GOTO_LOG', 'GOTO_RIVER', 'GOTO_FAR_BANK', and 'GOTO_HOUSE'.
 * **Worker Agent (`WorkerAgent`)**: This low-level agent is responsible for executing specific sub-goals provided by the Manager. Its state space (`_get_worker_state`) includes the agent's current coordinates (`ax`, `ay`) and the same global progress flags as the Manager. The action space comprises primitive movement actions: 'UP', 'DOWN', 'LEFT', 'RIGHT'.
 
-Both agents utilize Q-learning with an epsilon-greedy policy for action selection and value iteration for Q-table updates.
+Both agents utilize Q-learning with an epsilon-greedy policy for action selection. Q-values are approximated by small neural networks (rather than a lookup table) and updated via bootstrapped TD-target regression against a periodically-synced target network, which stabilizes training by keeping the bootstrap target from shifting on every gradient step.
 
 #### 2.2 Hindsight Experience Replay (HER)
 
@@ -72,7 +72,7 @@ To set up and run this Django application locally:
 
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/miles-howell/bridge-crossing-rl-sim.git](https://github.com/miles-howell/bridge-crossing-rl-sim.git)
+    git clone https://github.com/miles-howell/bridge-crossing-rl-sim.git
     cd bridge-crossing-rl-sim
     ```
 2.  **Create and activate a virtual environment:**
@@ -82,7 +82,7 @@ To set up and run this Django application locally:
     ```
 3.  **Install dependencies:**
     ```bash
-    pip install django
+    pip install -r requirements.txt
     ```
 4.  **Apply database migrations:**
     ```bash
@@ -110,6 +110,7 @@ Upon accessing the application, users can:
 * **Backend:**
     * Python 3.x
     * Django (Python web framework)
+    * PyTorch (neural network Q-value approximation for both agents)
 * **Frontend:**
     * HTML5, CSS3, JavaScript
     * Tailwind CSS (for styling)

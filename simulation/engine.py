@@ -197,7 +197,7 @@ class ManagerAgent:
         best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
         return random.choice(best_actions)
 
-    def update_q_table(self, state, action, reward, next_state, done, store=True):
+    def train_step(self, state, action, reward, next_state, done, store=True):
         if store:
             self.memory.add(state, action, reward, next_state, None, done)
         self.train_on_batch([(state, action, reward, next_state, done)])
@@ -384,7 +384,7 @@ class SimulationEngine:
                 manager_state = world.last_manager_state
                 next_manager_state = self._get_manager_state(world)
                 manager_done = agent['status'] != AgentState.IN_PROGRESS
-                self.manager.update_q_table(manager_state, world.current_subgoal_name, manager_reward, next_manager_state, manager_done)
+                self.manager.train_step(manager_state, world.current_subgoal_name, manager_reward, next_manager_state, manager_done)
 
                 for state, act, rew, next_s, ach_g in world.subgoal_trajectory:
                     done = (
