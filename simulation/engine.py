@@ -59,10 +59,19 @@ class ReplayBuffer:
 class WorkerAgent:
     """The Worker uses a neural network to approximate Q-values for state-goal pairs."""
 
-    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1, buffer_size=20000, target_sync_freq=500):
+    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1,
+                 epsilon_min=0.1, epsilon_decay=0.9995, buffer_size=20000, target_sync_freq=500):
         self.actions = actions
         self.gamma = discount_factor
-        self.epsilon = exploration_rate
+        self.epsilon_start = exploration_rate
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
+        # Decayed independently per assigned-goal coordinate rather than one
+        # shared epsilon, so a goal the worker has barely attempted (e.g. one
+        # only reachable late in training) keeps a near-fresh exploration
+        # budget regardless of how much total training time has elapsed on
+        # OTHER goals. Lazily initialized to epsilon_start on first visit.
+        self.epsilon_by_goal = {}
         self.memory = ReplayBuffer(buffer_size)
 
         input_dim = 7  # (ax, ay, has_bridge, bridge_placed, has_crossed, goal_x, goal_y)
@@ -108,14 +117,19 @@ class WorkerAgent:
         return [max_per_cell[r * cols:(r + 1) * cols] for r in range(rows)]
 
     def choose_action(self, state, goal):
-        if random.random() < self.epsilon:
-            return random.choice(self.actions)
-        state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
-        with torch.no_grad():
-            q_values = self.model(state_goal)[0]
-        max_q = torch.max(q_values).item()
-        best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
-        return random.choice(best_actions)
+        goal_key = tuple(goal)
+        epsilon = self.epsilon_by_goal.get(goal_key, self.epsilon_start)
+        if random.random() < epsilon:
+            action = random.choice(self.actions)
+        else:
+            state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
+            with torch.no_grad():
+                q_values = self.model(state_goal)[0]
+            max_q = torch.max(q_values).item()
+            best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
+            action = random.choice(best_actions)
+        self.epsilon_by_goal[goal_key] = max(self.epsilon_min, epsilon * self.epsilon_decay)
+        return action
 
     def train_on_batch(self, minibatch):
         """Runs one vectorized gradient step over a whole minibatch at once,
@@ -156,10 +170,19 @@ class WorkerAgent:
 class ManagerAgent:
     """High-level manager approximating Q-values with a neural network."""
 
-    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1, buffer_size=10000, target_sync_freq=500):
+    def __init__(self, actions, learning_rate=0.1, discount_factor=0.9, exploration_rate=0.1,
+                 epsilon_min=0.1, epsilon_decay=0.99, buffer_size=10000, target_sync_freq=500):
         self.actions = actions
         self.gamma = discount_factor
-        self.epsilon = exploration_rate
+        self.epsilon_start = exploration_rate
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
+        # See WorkerAgent: decayed independently per manager state (only 8
+        # possible) rather than one shared epsilon, so a state only reached
+        # late (e.g. after crossing the bridge for the first time) keeps a
+        # near-fresh exploration budget instead of inheriting a global
+        # epsilon already ground down by decisions in earlier states.
+        self.epsilon_by_state = {}
         self.memory = ReplayBuffer(buffer_size)
 
         input_dim = 3  # (has_bridge_piece, bridge_placed, has_crossed)
@@ -200,14 +223,19 @@ class ManagerAgent:
         return q_values.tolist()
 
     def choose_action(self, state):
-        if random.random() < self.epsilon:
-            return random.choice(self.actions)
-        state_t = torch.tensor([list(state)], dtype=torch.float32)
-        with torch.no_grad():
-            q_values = self.model(state_t)[0]
-        max_q = torch.max(q_values).item()
-        best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
-        return random.choice(best_actions)
+        state_key = tuple(state)
+        epsilon = self.epsilon_by_state.get(state_key, self.epsilon_start)
+        if random.random() < epsilon:
+            action = random.choice(self.actions)
+        else:
+            state_t = torch.tensor([list(state)], dtype=torch.float32)
+            with torch.no_grad():
+                q_values = self.model(state_t)[0]
+            max_q = torch.max(q_values).item()
+            best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
+            action = random.choice(best_actions)
+        self.epsilon_by_state[state_key] = max(self.epsilon_min, epsilon * self.epsilon_decay)
+        return action
 
     def train_step(self, state, action, reward, next_state, done, store=True):
         if store:
