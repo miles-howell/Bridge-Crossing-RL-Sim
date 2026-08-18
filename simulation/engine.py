@@ -90,7 +90,7 @@ class WorkerAgent:
         best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
         return random.choice(best_actions)
 
-    def update_q_table(self, state, action, reward, next_state, goal, done):
+    def train_step(self, state, action, reward, next_state, goal, done):
         state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
         next_state_goal = torch.tensor([list(next_state) + list(goal)], dtype=torch.float32)
         action_index = torch.tensor([self.actions.index(action)])
@@ -112,7 +112,7 @@ class WorkerAgent:
     def experience_replay(self, batch_size):
         minibatch = self.memory.sample(batch_size)
         for state, action, reward, next_state, goal, done in minibatch:
-            self.update_q_table(state, action, reward, next_state, goal, done)
+            self.train_step(state, action, reward, next_state, goal, done)
 
 
 class ManagerAgent:
@@ -160,7 +160,7 @@ class ManagerAgent:
         best_actions = [a for a, q in zip(self.actions, q_values.tolist()) if q == max_q]
         return random.choice(best_actions)
 
-    def update_q_table(self, state, action, reward, next_state, done, store=True):
+    def train_step(self, state, action, reward, next_state, done, store=True):
         if store:
             self.memory.add(state, action, reward, next_state, None, done)
 
@@ -185,7 +185,7 @@ class ManagerAgent:
     def experience_replay(self, batch_size):
         minibatch = self.memory.sample(batch_size)
         for state, action, reward, next_state, _, done in minibatch:
-            self.update_q_table(state, action, reward, next_state, done, store=False)
+            self.train_step(state, action, reward, next_state, done, store=False)
 
 
 class SimulationWorld:
@@ -341,7 +341,7 @@ class SimulationEngine:
                 manager_state = world.last_manager_state
                 next_manager_state = self._get_manager_state(world)
                 manager_done = agent['status'] != AgentState.IN_PROGRESS
-                self.manager.update_q_table(manager_state, world.current_subgoal_name, manager_reward, next_manager_state, manager_done)
+                self.manager.train_step(manager_state, world.current_subgoal_name, manager_reward, next_manager_state, manager_done)
 
                 for state, act, rew, next_s, ach_g in world.subgoal_trajectory:
                     done = (

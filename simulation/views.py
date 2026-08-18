@@ -132,7 +132,7 @@ def api_q_values(request):
 
 # --- NEW: API endpoint for Manager's Q-values ---
 def api_manager_q_values(request):
-    """ API endpoint to fetch the Manager's Q-table for visualization. """
+    """ API endpoint to fetch the Manager's learned Q-values for visualization. """
     if request.method != 'POST':
         return JsonResponse({'status': 'error', 'message': 'Only POST method is allowed.'}, status=405)
 
@@ -150,4 +150,4 @@ def api_manager_q_values(request):
         state_key = ",".join(map(str, state))
         serialized[state_key] = q_values
 
-    return JsonResponse({'manager_q_table': serialized})
+    return JsonResponse({'manager_q_values': serialized})
