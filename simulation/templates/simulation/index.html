@@ -487,9 +487,8 @@
                     simCanvas.background = bgCanvas;
                 }
                 simCtx.drawImage(simCanvas.background, 0, 0);
-                const firstWorld = gameState.worlds[0];
-                if (!firstWorld) return;
-                const riverStartCol = firstWorld.river_start_col, riverWaterWidth = 3;
+                if (gameState.river_start_col === undefined) return;
+                const riverStartCol = gameState.river_start_col, riverWaterWidth = 3;
                 for (let r = 0; r < GRID_ROWS; r++) {
                     simCtx.drawImage(tileSheet, TILE_MAP.water_grass_l.x * TILE_SOURCE_SIZE, TILE_MAP.water_grass_l.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, riverStartCol * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     for (let c = 1; c <= riverWaterWidth; c++) {
@@ -508,7 +507,7 @@
                 for (let r = 0; r < TILE_MAP.house.length; r++) {
                     for (let c = 0; c < TILE_MAP.house[r].length; c++) {
                         const tile = TILE_MAP.house[r][c];
-                        simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (firstWorld.house_start_col + c) * TILE_DEST_SIZE, (firstWorld.house_start_row + r) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                        simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (gameState.house_start_col + c) * TILE_DEST_SIZE, (gameState.house_start_row + r) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     }
                 }
                 gameState.worlds.forEach((world) => {
