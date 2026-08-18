@@ -185,7 +185,7 @@ class ManagerAgent:
         self.epsilon_by_state = {}
         self.memory = ReplayBuffer(buffer_size)
 
-        input_dim = 3  # (has_bridge_piece, bridge_placed, has_crossed)
+        input_dim = 4  # (has_bridge_piece, bridge_placed, has_crossed, last_subgoal_failed)
         self.model = nn.Sequential(
             nn.Linear(input_dim, 64),
             nn.ReLU(),
@@ -310,6 +310,14 @@ class SimulationWorld:
         # subgoals and leading to feedback loops.
         self.last_manager_state = None
 
+        # Gives the manager one bit of memory: did its most recently
+        # concluded subgoal fail? Without this the manager's state is fully
+        # memoryless (just the 3 task-progress flags) and can't represent
+        # "I already tried this and it didn't work" -- every decision looks
+        # identical to a first attempt no matter how many times it's failed
+        # in this life.
+        self.last_subgoal_failed = False
+
         self.milestones_rewarded = {
             'log_picked_up': False,
             'bridge_placed': False,
@@ -332,7 +340,12 @@ class SimulationEngine:
         self.manager_steps = 0
 
     def _get_manager_state(self, world):
-        return (1 if world.agent['has_bridge_piece'] else 0, 1 if world.placed_bridge else 0, 1 if world.agent['has_crossed'] else 0)
+        return (
+            1 if world.agent['has_bridge_piece'] else 0,
+            1 if world.placed_bridge else 0,
+            1 if world.agent['has_crossed'] else 0,
+            1 if world.last_subgoal_failed else 0,
+        )
 
     def _get_worker_state(self, world):
         return (world.agent['ax'], world.agent['ay'], 1 if world.agent['has_bridge_piece'] else 0, 1 if world.placed_bridge else 0, 1 if world.agent['has_crossed'] else 0)
@@ -439,6 +452,10 @@ class SimulationEngine:
                 # The manager is ONLY rewarded if its command led to a new milestone.
                 manager_reward = 100 if new_milestone_achieved else -100
                 manager_state = world.last_manager_state
+                # Set before computing next_manager_state so the manager's
+                # NEXT decision sees whether the subgoal that just concluded
+                # succeeded or failed.
+                world.last_subgoal_failed = not new_milestone_achieved
                 next_manager_state = self._get_manager_state(world)
                 manager_done = agent['status'] != AgentState.IN_PROGRESS
                 self.manager.train_step(manager_state, world.current_subgoal_name, manager_reward, next_manager_state, manager_done)

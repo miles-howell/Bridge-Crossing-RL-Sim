@@ -130,7 +130,7 @@ def api_manager_q_values(request):
     engine = server_engines[engine_id]
     manager = engine.manager
 
-    states = [(a, b, c) for a in (0, 1) for b in (0, 1) for c in (0, 1)]
+    states = [(a, b, c, d) for a in (0, 1) for b in (0, 1) for c in (0, 1) for d in (0, 1)]
     q_rows = manager.get_all_q_values(states)
     serialized = {
         ",".join(map(str, state)): dict(zip(manager.actions, q_row))
