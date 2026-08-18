@@ -32,6 +32,7 @@ GRAD_CLIP_NORM = 1.0
 # manager's own reward (which IS gated on task-level correctness): the
 # worker's job is to execute directives reliably, not to judge them.
 WORKER_SUBGOAL_BONUS = 100
+NOVELTY_BONUS_SCALE = 5
 
 
 class AgentState:
@@ -73,6 +74,14 @@ class WorkerAgent:
         # OTHER goals. Lazily initialized to epsilon_start on first visit.
         self.epsilon_by_goal = {}
         self.memory = ReplayBuffer(buffer_size)
+
+        # Count-based novelty bonus: a small reward for visiting
+        # under-visited grid cells, decaying with visit count. Computed
+        # purely from the worker's own visitation history -- never tells it
+        # WHICH cells matter, just biases toward covering ground it hasn't
+        # already covered, to help it find useful states at all under a
+        # mostly-random early policy.
+        self.visit_counts = {}
 
         input_dim = 7  # (ax, ay, has_bridge, bridge_placed, has_crossed, goal_x, goal_y)
         self.model = nn.Sequential(
@@ -165,6 +174,12 @@ class WorkerAgent:
         minibatch = self.memory.sample(batch_size)
         if minibatch:
             self.train_on_batch(minibatch)
+
+    def novelty_bonus(self, pos):
+        key = tuple(pos)
+        count = self.visit_counts.get(key, 0)
+        self.visit_counts[key] = count + 1
+        return NOVELTY_BONUS_SCALE / ((count + 1) ** 0.5)
 
 
 class ManagerAgent:
@@ -390,6 +405,9 @@ class SimulationEngine:
             reward = -self.step_penalty
             current_pos = (agent['ax'], agent['ay'])
             new_milestone_achieved = False
+            # Worker-only novelty shaping -- doesn't affect the manager's
+            # reward (computed separately below from new_milestone_achieved).
+            reward += self.worker.novelty_bonus(current_pos)
 
             # --- FINAL REWARD LOGIC REFACTOR ---
             # This logic now strictly ties the manager's reward to the achievement of a NEW milestone.
