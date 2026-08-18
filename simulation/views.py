@@ -106,26 +106,13 @@ def api_q_values(request):
     all_q_maps = {}
 
     for vis_name, goal_coord in goals_to_visualize.items():
-        q_map = []
         state_conditions = states_to_visualize.get(vis_name, {})
-
-        for r in range(GRID_ROWS):
-            q_row = []
-            for c in range(GRID_COLS):
-                agent_state = (c, r,
-                               1 if state_conditions.get('has_bridge') else 0,
-                               1 if state_conditions.get('bridge_placed') else 0,
-                               1 if state_conditions.get('has_crossed') else 0)
-
-                q_values = {a: worker.get_q_value(agent_state, goal_coord, a) for a in worker.actions}
-
-                if not q_values or all(v == 0 for v in q_values.values()):
-                    max_q = 0
-                else:
-                    max_q = max(q_values.values())
-                q_row.append(max_q)
-            q_map.append(q_row)
-
+        flags = (
+            1 if state_conditions.get('has_bridge') else 0,
+            1 if state_conditions.get('bridge_placed') else 0,
+            1 if state_conditions.get('has_crossed') else 0,
+        )
+        q_map = worker.get_max_q_grid(goal_coord, GRID_ROWS, GRID_COLS, flags)
         all_q_maps[vis_name] = {'q_map': q_map}
 
     return JsonResponse({ 'q_maps': all_q_maps, 'rows': GRID_ROWS, 'cols': GRID_COLS })
@@ -144,10 +131,10 @@ def api_manager_q_values(request):
     manager = engine.manager
 
     states = [(a, b, c) for a in (0, 1) for b in (0, 1) for c in (0, 1)]
-    serialized = {}
-    for state in states:
-        q_values = {action: manager.get_q_value(state, action) for action in manager.actions}
-        state_key = ",".join(map(str, state))
-        serialized[state_key] = q_values
+    q_rows = manager.get_all_q_values(states)
+    serialized = {
+        ",".join(map(str, state)): dict(zip(manager.actions, q_row))
+        for state, q_row in zip(states, q_rows)
+    }
 
     return JsonResponse({'manager_q_table': serialized})

@@ -89,11 +89,16 @@ class WorkerAgent:
         if self.train_steps // self.target_sync_freq > prev // self.target_sync_freq:
             self.sync_target_network()
 
-    def get_q_value(self, state, goal, action):
-        state_goal = torch.tensor([list(state) + list(goal)], dtype=torch.float32)
+    def get_max_q_grid(self, goal, rows, cols, flags):
+        """Returns a rows x cols grid of the max Q-value over all actions, for
+        the given goal and fixed (has_bridge, bridge_placed, has_crossed)
+        flags, using one batched forward pass instead of one call per cell."""
+        states = [(c, r) + flags for r in range(rows) for c in range(cols)]
+        state_goal = torch.tensor([list(s) + list(goal) for s in states], dtype=torch.float32)
         with torch.no_grad():
-            q_values = self.model(state_goal)[0]
-        return q_values[self.actions.index(action)].item()
+            q_values = self.model(state_goal)
+        max_per_cell = q_values.max(dim=1).values.tolist()
+        return [max_per_cell[r * cols:(r + 1) * cols] for r in range(rows)]
 
     def choose_action(self, state, goal):
         if random.random() < self.epsilon:
@@ -174,11 +179,13 @@ class ManagerAgent:
         if self.train_steps // self.target_sync_freq > prev // self.target_sync_freq:
             self.sync_target_network()
 
-    def get_q_value(self, state, action):
-        state_t = torch.tensor([list(state)], dtype=torch.float32)
+    def get_all_q_values(self, states):
+        """Returns a list of per-action Q-value lists, one per input state,
+        using a single batched forward pass instead of one call per state."""
+        state_t = torch.tensor([list(s) for s in states], dtype=torch.float32)
         with torch.no_grad():
-            q_values = self.model(state_t)[0]
-        return q_values[self.actions.index(action)].item()
+            q_values = self.model(state_t)
+        return q_values.tolist()
 
     def choose_action(self, state):
         if random.random() < self.epsilon:
