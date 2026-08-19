@@ -581,11 +581,17 @@
                 // New 2D layout based on user sketch
                 const w = managerCanvas.width;
                 const h = managerCanvas.height;
+                // stateKey is (has_bridge_piece, bridge_placed, has_crossed,
+                // last_subgoal_failed) -- the manager gained that 4th
+                // dimension (retry-memory) after this graph was built. Each
+                // node shows the "last attempt succeeded" (0) variant, since
+                // that's the happy-path reading these node labels describe;
+                // the "just failed" variant isn't represented here.
                 const nodePositions = {
-                    'START':         { x: w * 0.20, y: h * 0.5,  label: 'Start', stateKey: '0,0,0'},
-                    'HAS_LOG':       { x: w * 0.20, y: h * 0.2,  label: 'Has Log', stateKey: '1,0,0'},
-                    'BRIDGE_PLACED': { x: w * 0.5,  y: h - 45, label: 'Bridge Placed', stateKey: '0,1,0'},
-                    'CROSSED':       { x: w * 0.80, y: h * 0.5,  label: 'Crossed', stateKey: '0,1,1'},
+                    'START':         { x: w * 0.20, y: h * 0.5,  label: 'Start', stateKey: '0,0,0,0'},
+                    'HAS_LOG':       { x: w * 0.20, y: h * 0.2,  label: 'Has Log', stateKey: '1,0,0,0'},
+                    'BRIDGE_PLACED': { x: w * 0.5,  y: h - 45, label: 'Bridge Placed', stateKey: '0,1,0,0'},
+                    'CROSSED':       { x: w * 0.80, y: h * 0.5,  label: 'Crossed', stateKey: '0,1,1,0'},
                     'HOME':          { x: w * 0.80, y: h * 0.2,  label: 'Home', stateKey: null}
                 };
                 
