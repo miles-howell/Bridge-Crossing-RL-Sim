@@ -32,6 +32,7 @@ GRAD_CLIP_NORM = 1.0
 # manager's own reward (which IS gated on task-level correctness): the
 # worker's job is to execute directives reliably, not to judge them.
 WORKER_SUBGOAL_BONUS = 100
+NOVELTY_BONUS_SCALE = 5
 
 
 class AgentState:
@@ -73,6 +74,14 @@ class WorkerAgent:
         # OTHER goals. Lazily initialized to epsilon_start on first visit.
         self.epsilon_by_goal = {}
         self.memory = ReplayBuffer(buffer_size)
+
+        # Count-based novelty bonus: a small reward for visiting
+        # under-visited grid cells, decaying with visit count. Computed
+        # purely from the worker's own visitation history -- never tells it
+        # WHICH cells matter, just biases toward covering ground it hasn't
+        # already covered, to help it find useful states at all under a
+        # mostly-random early policy.
+        self.visit_counts = {}
 
         input_dim = 7  # (ax, ay, has_bridge, bridge_placed, has_crossed, goal_x, goal_y)
         self.model = nn.Sequential(
@@ -166,6 +175,12 @@ class WorkerAgent:
         if minibatch:
             self.train_on_batch(minibatch)
 
+    def novelty_bonus(self, pos):
+        key = tuple(pos)
+        count = self.visit_counts.get(key, 0)
+        self.visit_counts[key] = count + 1
+        return NOVELTY_BONUS_SCALE / ((count + 1) ** 0.5)
+
 
 class ManagerAgent:
     """High-level manager approximating Q-values with a neural network."""
@@ -185,7 +200,7 @@ class ManagerAgent:
         self.epsilon_by_state = {}
         self.memory = ReplayBuffer(buffer_size)
 
-        input_dim = 3  # (has_bridge_piece, bridge_placed, has_crossed)
+        input_dim = 4  # (has_bridge_piece, bridge_placed, has_crossed, last_subgoal_failed)
         self.model = nn.Sequential(
             nn.Linear(input_dim, 64),
             nn.ReLU(),
@@ -310,6 +325,14 @@ class SimulationWorld:
         # subgoals and leading to feedback loops.
         self.last_manager_state = None
 
+        # Gives the manager one bit of memory: did its most recently
+        # concluded subgoal fail? Without this the manager's state is fully
+        # memoryless (just the 3 task-progress flags) and can't represent
+        # "I already tried this and it didn't work" -- every decision looks
+        # identical to a first attempt no matter how many times it's failed
+        # in this life.
+        self.last_subgoal_failed = False
+
         self.milestones_rewarded = {
             'log_picked_up': False,
             'bridge_placed': False,
@@ -332,7 +355,12 @@ class SimulationEngine:
         self.manager_steps = 0
 
     def _get_manager_state(self, world):
-        return (1 if world.agent['has_bridge_piece'] else 0, 1 if world.placed_bridge else 0, 1 if world.agent['has_crossed'] else 0)
+        return (
+            1 if world.agent['has_bridge_piece'] else 0,
+            1 if world.placed_bridge else 0,
+            1 if world.agent['has_crossed'] else 0,
+            1 if world.last_subgoal_failed else 0,
+        )
 
     def _get_worker_state(self, world):
         return (world.agent['ax'], world.agent['ay'], 1 if world.agent['has_bridge_piece'] else 0, 1 if world.placed_bridge else 0, 1 if world.agent['has_crossed'] else 0)
@@ -377,6 +405,9 @@ class SimulationEngine:
             reward = -self.step_penalty
             current_pos = (agent['ax'], agent['ay'])
             new_milestone_achieved = False
+            # Worker-only novelty shaping -- doesn't affect the manager's
+            # reward (computed separately below from new_milestone_achieved).
+            reward += self.worker.novelty_bonus(current_pos)
 
             # --- FINAL REWARD LOGIC REFACTOR ---
             # This logic now strictly ties the manager's reward to the achievement of a NEW milestone.
@@ -439,6 +470,10 @@ class SimulationEngine:
                 # The manager is ONLY rewarded if its command led to a new milestone.
                 manager_reward = 100 if new_milestone_achieved else -100
                 manager_state = world.last_manager_state
+                # Set before computing next_manager_state so the manager's
+                # NEXT decision sees whether the subgoal that just concluded
+                # succeeded or failed.
+                world.last_subgoal_failed = not new_milestone_achieved
                 next_manager_state = self._get_manager_state(world)
                 manager_done = agent['status'] != AgentState.IN_PROGRESS
                 self.manager.train_step(manager_state, world.current_subgoal_name, manager_reward, next_manager_state, manager_done)
