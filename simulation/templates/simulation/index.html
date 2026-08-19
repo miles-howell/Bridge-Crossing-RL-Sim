@@ -547,9 +547,14 @@
                 }
                 const currentMapData = q_maps[activeState];
                 if (!currentMapData) return;
-                const allQs = Object.values(q_maps).flatMap((mapData) => mapData.q_map.flat());
-                const maxQ = Math.max(...allQs.filter((q) => q > -1000 && q < 1000), 0);
-                const minQ = Math.min(...allQs.filter((q) => q > -1000 && q < 1000), 0);
+                // Normalize against this panel's own values, not all 4 goals
+                // combined -- a shared scale lets whichever goal happens to
+                // have the most extreme value (typically the least-trained
+                // one, which is noisiest) wash out the other three panels'
+                // real, legitimate differentiation.
+                const localQs = currentMapData.q_map.flat();
+                const maxQ = Math.max(...localQs.filter((q) => q > -1000 && q < 1000), 0);
+                const minQ = Math.min(...localQs.filter((q) => q > -1000 && q < 1000), 0);
                 qCtx.clearRect(0, 0, qCanvas.width, qCanvas.height);
                 for (let r = 0; r < rows; r++) {
                     for (let c = 0; c < cols; c++) {
@@ -581,11 +586,17 @@
                 // New 2D layout based on user sketch
                 const w = managerCanvas.width;
                 const h = managerCanvas.height;
+                // stateKey is (has_bridge_piece, bridge_placed, has_crossed,
+                // last_subgoal_failed) -- the manager gained that 4th
+                // dimension (retry-memory) after this graph was built. Each
+                // node shows the "last attempt succeeded" (0) variant, since
+                // that's the happy-path reading these node labels describe;
+                // the "just failed" variant isn't represented here.
                 const nodePositions = {
-                    'START':         { x: w * 0.20, y: h * 0.5,  label: 'Start', stateKey: '0,0,0'},
-                    'HAS_LOG':       { x: w * 0.20, y: h * 0.2,  label: 'Has Log', stateKey: '1,0,0'},
-                    'BRIDGE_PLACED': { x: w * 0.5,  y: h - 45, label: 'Bridge Placed', stateKey: '0,1,0'},
-                    'CROSSED':       { x: w * 0.80, y: h * 0.5,  label: 'Crossed', stateKey: '0,1,1'},
+                    'START':         { x: w * 0.20, y: h * 0.5,  label: 'Start', stateKey: '0,0,0,0'},
+                    'HAS_LOG':       { x: w * 0.20, y: h * 0.2,  label: 'Has Log', stateKey: '1,0,0,0'},
+                    'BRIDGE_PLACED': { x: w * 0.5,  y: h - 45, label: 'Bridge Placed', stateKey: '0,1,0,0'},
+                    'CROSSED':       { x: w * 0.80, y: h * 0.5,  label: 'Crossed', stateKey: '0,1,1,0'},
                     'HOME':          { x: w * 0.80, y: h * 0.2,  label: 'Home', stateKey: null}
                 };
                 
