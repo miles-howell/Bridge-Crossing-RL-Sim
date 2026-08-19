@@ -287,20 +287,6 @@
                             />
                         </div>
                         <div class="control-group">
-                            <label for="erSlider"
-                                >Exploration Rate (<span id="erValue">0.7</span
-                                >)</label
-                            >
-                            <input
-                                type="range"
-                                id="erSlider"
-                                min="0"
-                                max="1"
-                                step="0.01"
-                                value="0.7"
-                            />
-                        </div>
-                        <div class="control-group">
                             <label for="batchSlider"
                                 >Replay Batch Size (<span id="batchValue"
                                     >32</span
@@ -374,7 +360,6 @@
                 workerLrSlider = document.getElementById("workerLrSlider"),
                 managerLrSlider = document.getElementById("managerLrSlider"),
                 dfSlider = document.getElementById("dfSlider"),
-                erSlider = document.getElementById("erSlider"),
                 speedSlider = document.getElementById("speedSlider"),
                 batchSlider = document.getElementById("batchSlider"),
                 costSlider = document.getElementById("costSlider");
@@ -382,7 +367,6 @@
                 workerLrValue = document.getElementById("workerLrValue"),
                 managerLrValue = document.getElementById("managerLrValue"),
                 dfValue = document.getElementById("dfValue"),
-                erValue = document.getElementById("erValue"),
                 speedValue = document.getElementById("speedValue"),
                 batchValue = document.getElementById("batchValue"),
                 costValue = document.getElementById("costValue");
@@ -774,7 +758,6 @@
                         workerLearningRate: workerLrSlider.value,
                         managerLearningRate: managerLrSlider.value,
                         discountFactor: dfSlider.value,
-                        explorationRate: erSlider.value,
                         batchSize: batchSlider.value,
                         costOfLiving: costSlider.value,
                     }),
@@ -830,7 +813,6 @@
             workerLrSlider.addEventListener("input", (e) => (workerLrValue.textContent = e.target.value));
             managerLrSlider.addEventListener("input", (e) => (managerLrValue.textContent = e.target.value));
             dfSlider.addEventListener("input", (e) => (dfValue.textContent = e.target.value));
-            erSlider.addEventListener("input", (e) => (erValue.textContent = e.target.value));
             batchSlider.addEventListener("input", (e) => (batchValue.textContent = e.target.value));
             costSlider.addEventListener("input", (e) => (costValue.textContent = e.target.value));
         </script>
