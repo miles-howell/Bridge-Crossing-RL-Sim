@@ -555,8 +555,11 @@
                 TILE_DEST_SIZE = 40;
             const charSheet = new Image(),
                 tileSheet = new Image();
+            // A01 is Nigel (charSheet); A02-A10 each get one of these 16x32-frame sheets.
+            const AGENT_SHEET_NAMES = ["beekeeper", "builder", "painter", "fisher", "hiker", "engineer", "sailor", "aviator", "gardener"];
+            const agentSheets = AGENT_SHEET_NAMES.map(() => new Image());
             let loadedAssets = 0;
-            const totalAssets = 2;
+            const totalAssets = 2 + agentSheets.length;
 
             // Canvas colors come from the active theme's CSS variables.
             let theme = {};
@@ -594,13 +597,20 @@
             function assetLoaded() {
                 if (++loadedAssets === totalAssets) startOrResetSimulation();
             }
-            charSheet.onload = tileSheet.onload = assetLoaded;
-            charSheet.onerror = () => {
+            function assetFailed() {
                 console.error("Asset failed to load.");
                 statusEl.textContent = "error: could not load assets";
-            };
+            }
+            charSheet.onload = tileSheet.onload = assetLoaded;
+            charSheet.onerror = assetFailed;
             charSheet.src = "{% static 'images/character.png' %}";
             tileSheet.src = "{% static 'images/Overworld.png' %}";
+            const AGENT_SHEET_DIR = "{% static 'images/characters/' %}";
+            agentSheets.forEach((sheet, i) => {
+                sheet.onload = assetLoaded;
+                sheet.onerror = assetFailed;
+                sheet.src = `${AGENT_SHEET_DIR}${AGENT_SHEET_NAMES[i]}.png`;
+            });
 
             const TILE_SOURCE_SIZE = 16;
             const TILE_MAP = {
@@ -647,6 +657,12 @@
                     { top: { x: 2, y: 4 }, bottom: { x: 2, y: 5 } }, { top: { x: 3, y: 4 }, bottom: { x: 3, y: 5 } },
                 ],
             };
+            // Agent sheets: one 16x32 frame per cell, a row per direction. The first four
+            // frames of each row form a walk cycle (idle/stride frames alternate).
+            const AGENT_SHEET_FRAME = { w: 16, h: 32, count: 4 };
+            const AGENT_SHEET_ROWS = { DOWN: 0, RIGHT: 1, UP: 2, LEFT: 3 };
+            // Agent-sheet feet sit 3px higher in the frame than Nigel's; shift them down to match.
+            const AGENT_SHEET_FOOT_OFFSET = 3;
             let activeRipples = [];
 
             function drawScene() {
@@ -716,11 +732,19 @@
             }
             function drawAgents() {
                 if (!gameState || !gameState.worlds || !charSheet.complete || charSheet.naturalHeight === 0) return;
-                gameState.worlds.forEach((world) => {
+                gameState.worlds.forEach((world, i) => {
                     const agent = world.agent;
                     const anim_frames = CHAR_SPRITE_MAP[agent.last_action];
                     if (!anim_frames) return;
                     const current_frame_index = Math.floor(agent.animation_frame / 4) % anim_frames.length;
+                    if (i > 0) {
+                        const sheet = agentSheets[(i - 1) % agentSheets.length];
+                        const { w, h, count } = AGENT_SHEET_FRAME;
+                        const scale = TILE_DEST_SIZE / TILE_SOURCE_SIZE;
+                        simCtx.drawImage(sheet, (current_frame_index % count) * w, AGENT_SHEET_ROWS[agent.last_action] * h, w, h,
+                            agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE + AGENT_SHEET_FOOT_OFFSET * scale, w * scale, h * scale);
+                        return;
+                    }
                     const frame = anim_frames[current_frame_index];
                     simCtx.drawImage(charSheet, frame.bottom.x * TILE_SOURCE_SIZE, frame.bottom.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, agent.ay * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     simCtx.drawImage(charSheet, frame.top.x * TILE_SOURCE_SIZE, frame.top.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
