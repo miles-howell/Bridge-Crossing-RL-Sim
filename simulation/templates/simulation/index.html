@@ -52,6 +52,9 @@
                 --pill-muted: #8b95a5;
                 --pill-track: #1e3a2a;
                 --spark: #38bdf8;
+                --focus-rgb: 245, 165, 36;
+                --trail-rgb: 245, 165, 36;
+                --trail-casing-rgb: 14, 17, 22;
                 --font-sans: "Inter Tight", system-ui, sans-serif;
                 --font-mono: "JetBrains Mono", ui-monospace, monospace;
                 --head-font: var(--font-mono);
@@ -88,6 +91,9 @@
                 --pill-muted: rgba(255, 255, 255, 0.85);
                 --pill-track: rgba(255, 255, 255, 0.3);
                 --spark: #1f4fd8;
+                --focus-rgb: 31, 79, 216;
+                --trail-rgb: 17, 20, 24;
+                --trail-casing-rgb: 255, 255, 255;
                 --font-sans: "Inter", system-ui, sans-serif;
                 --font-mono: "Roboto Mono", ui-monospace, monospace;
                 --head-font: var(--font-sans);
@@ -300,12 +306,29 @@
             .agent-row {
                 display: flex;
                 align-items: center;
-                gap: 10px;
+                gap: 4px;
                 font-family: var(--font-mono);
                 font-size: 12px;
-                padding: 4px 0;
                 border-bottom: 1px solid var(--rule);
             }
+            .agent-row button {
+                display: flex;
+                align-items: center;
+                min-height: 28px;
+                border: 0;
+                border-radius: 4px;
+                background: none;
+                color: inherit;
+                font: inherit;
+            }
+            .agent-row button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+            .agent-select { flex: 1; gap: 10px; min-width: 0; padding: 0 6px; text-align: left; }
+            .agent-vis { justify-content: center; width: 28px; padding: 0; color: var(--muted); }
+            .agent-vis:hover { color: var(--text); }
+            .agent-vis[aria-pressed="true"] .eye-off, .agent-vis[aria-pressed="false"] .eye-on { display: none; }
+            .agent-row.hovered .agent-select { background: var(--surface-2); }
+            .agent-row.selected .agent-select { background: rgba(var(--focus-rgb), 0.16); box-shadow: inset 2px 0 0 rgb(var(--focus-rgb)); }
+            .agent-row.hidden .agent-select { opacity: 0.45; }
             .agent-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pos); }
             .agent-row .dot.done { background: var(--muted); }
             .agent-row .id { color: var(--muted); }
@@ -574,7 +597,10 @@
                     negRgb: v("--neg-rgb"),
                     qPosRgb: v("--q-pos-rgb"),
                     qNegRgb: v("--q-neg-rgb"),
+                    trailRgb: v("--trail-rgb"),
+                    trailCasingRgb: v("--trail-casing-rgb"),
                     font: v("--font-sans"),
+                    focusRgb: v("--focus-rgb"),
                 };
             }
             function setTheme(name, persist) {
@@ -715,7 +741,9 @@
                         simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (gameState.house_start_col + c) * TILE_DEST_SIZE, (gameState.house_start_row + r) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     }
                 }
-                gameState.worlds.forEach((world) => {
+                // A hidden agent's log and bridge are hidden with it.
+                gameState.worlds.forEach((world, i) => {
+                    if (!isAgentVisible(i)) return;
                     if (world.bridge_piece) {
                         for (let i = 0; i < TILE_MAP.bridge_asset.length; i++) {
                             const tile = TILE_MAP.bridge_asset[i];
@@ -730,25 +758,320 @@
                     }
                 });
             }
+            // Agent focus, shared by the map and the Agents panel. Indices are
+            // world indices (A01 = 0). Display only: nothing here reaches the server.
+            // Selection and hidden agents survive a reset unless the new run has
+            // fewer agents; hiding an agent drops its selection.
+            let selectedAgent = null,
+                hoveredAgent = null;
+            const hiddenAgents = new Set();
+            // The agent the map currently emphasises: hover wins over selection,
+            // and a hidden or out-of-range agent is never focused.
+            function focusedAgent() {
+                const n = gameState && gameState.worlds ? gameState.worlds.length : 0;
+                return [hoveredAgent, selectedAgent].find((i) => i !== null && i < n && isAgentVisible(i)) ?? null;
+            }
+            function isAgentVisible(i) {
+                return !hiddenAgents.has(i);
+            }
+            function selectAgent(i) {
+                selectedAgent = i;
+                syncAgentRows();
+            }
+            function hoverAgent(i) {
+                if (hoveredAgent === i) return;
+                hoveredAgent = i;
+                syncAgentRows();
+            }
+            function setAgentVisible(i, visible) {
+                if (visible) hiddenAgents.delete(i);
+                else {
+                    hiddenAgents.add(i);
+                    if (selectedAgent === i) selectedAgent = null;
+                }
+                syncAgentRows();
+            }
+            // Drop focus state that points past the end of a smaller new run.
+            function pruneAgentFocus(n) {
+                if (selectedAgent !== null && selectedAgent >= n) selectedAgent = null;
+                if (hoveredAgent !== null && hoveredAgent >= n) hoveredAgent = null;
+                hiddenAgents.forEach((i) => { if (i >= n) hiddenAgents.delete(i); });
+            }
+
+            // Map picking. The last pointer position is kept so the hover follows
+            // agents that walk under (or away from) a cursor that isn't moving.
+            let mapPointer = null;
+            function agentAt(point) {
+                if (!point || !gameState || !gameState.worlds) return null;
+                const col = point.x / TILE_DEST_SIZE, row = point.y / TILE_DEST_SIZE;
+                // Topmost first. A sprite covers its feet tile and the tile above.
+                const order = agentDrawOrder();
+                for (let k = order.length - 1; k >= 0; k--) {
+                    const i = order[k], a = gameState.worlds[i].agent;
+                    if (!isAgentVisible(i) || !a) continue;
+                    if (col >= a.ax && col < a.ax + 1 && row >= a.ay - 1 && row < a.ay + 1) return i;
+                }
+                return null;
+            }
+            function canvasPoint(e) {
+                const rect = simCanvas.getBoundingClientRect();
+                return { x: (e.clientX - rect.left) * simCanvas.width / rect.width, y: (e.clientY - rect.top) * simCanvas.height / rect.height };
+            }
+            function refreshMapHover() {
+                if (!mapPointer) return;
+                const hit = agentAt(mapPointer);
+                simCanvas.style.cursor = hit === null ? "" : "pointer";
+                hoverAgent(hit);
+            }
+            simCanvas.addEventListener("pointermove", (e) => {
+                mapPointer = canvasPoint(e);
+                refreshMapHover();
+            });
+            simCanvas.addEventListener("pointerleave", () => {
+                mapPointer = null;
+                simCanvas.style.cursor = "";
+                hoverAgent(null);
+            });
+            simCanvas.addEventListener("click", (e) => selectAgent(agentAt(canvasPoint(e))));
+
+            // Called once per simulation tick with the previous and new state, for
+            // anything that tracks history across ticks (trails, status effects).
+            // prevState is null right after a reset.
+            function onStateUpdate(prevState, newState) {
+                updateStatusEffects(prevState, newState);
+                updateTrails(prevState, newState);
+            }
+
+            // Layers, bottom to top: trail, ground marks (focus ring), sprites in
+            // scene order, status overlays.
             function drawAgents() {
                 if (!gameState || !gameState.worlds || !charSheet.complete || charSheet.naturalHeight === 0) return;
-                gameState.worlds.forEach((world, i) => {
-                    const agent = world.agent;
-                    const anim_frames = CHAR_SPRITE_MAP[agent.last_action];
-                    if (!anim_frames) return;
-                    const current_frame_index = Math.floor(agent.animation_frame / 4) % anim_frames.length;
-                    if (i > 0) {
-                        const sheet = agentSheets[(i - 1) % agentSheets.length];
-                        const { w, h, count } = AGENT_SHEET_FRAME;
-                        const scale = TILE_DEST_SIZE / TILE_SOURCE_SIZE;
-                        simCtx.drawImage(sheet, (current_frame_index % count) * w, AGENT_SHEET_ROWS[agent.last_action] * h, w, h,
-                            agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE + AGENT_SHEET_FOOT_OFFSET * scale, w * scale, h * scale);
-                        return;
-                    }
-                    const frame = anim_frames[current_frame_index];
-                    simCtx.drawImage(charSheet, frame.bottom.x * TILE_SOURCE_SIZE, frame.bottom.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, agent.ay * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
-                    simCtx.drawImage(charSheet, frame.top.x * TILE_SOURCE_SIZE, frame.top.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                refreshMapHover();
+                drawAgentTrail();
+                drawAgentGroundMarks();
+                agentDrawOrder().forEach((i) => {
+                    if (!isAgentVisible(i)) return;
+                    simCtx.save();
+                    simCtx.globalAlpha = agentAlpha(i);
+                    drawAgentSprite(gameState.worlds[i], i);
+                    simCtx.restore();
                 });
+                drawAgentStatusOverlays();
+            }
+            // World indices of the agents in the order their sprites are painted.
+            // Sprites are two tiles tall, so an agent's head overlaps the row above
+            // it: painting by row (ay ascending) puts nearer agents in front. On a
+            // shared tile the focused agent goes on top, then the lowest index, so
+            // A01 tops the spawn stack. Within a row, columns are ordered too: sprites
+            // are one tile wide, so that never changes the picture, but it keeps the
+            // comparator a total order. Positions snap to tiles, so the order only
+            // changes when a tick arrives or the focus moves.
+            function agentDrawOrder() {
+                const worlds = gameState.worlds,
+                    f = focusedAgent();
+                return worlds.map((_, i) => i).sort((i, j) => {
+                    const a = worlds[i].agent, b = worlds[j].agent;
+                    return a.ay - b.ay || a.ax - b.ax || (i === f) - (j === f) || j - i;
+                });
+            }
+            // Sprite opacity: with an agent focused, the others fade back.
+            function agentAlpha(i) {
+                const f = focusedAgent();
+                return f === null || f === i ? 1 : 0.35;
+            }
+            // Recent tiles per agent (world index -> [{x, y, start}], oldest first),
+            // kept for every agent so a trail is ready the moment one is focused.
+            // `start` marks a point that must not join the one before it.
+            const TRAIL_LENGTH = 30;
+            let agentTrails = [];
+            function updateTrails(prevState, newState) {
+                const worlds = newState && newState.worlds;
+                if (!worlds) return;
+                if (!prevState || agentTrails.length !== worlds.length) agentTrails = worlds.map(() => []);
+                worlds.forEach((world, i) => {
+                    const trail = agentTrails[i], { ax: x, ay: y } = world.agent;
+                    const last = trail[trail.length - 1];
+                    // Standing still (e.g. walking into the edge) adds no point.
+                    if (last && last.x === x && last.y === y) return;
+                    // Break the line when the previous tick ended the episode
+                    // (this tick is the respawn) or the agent moved more than a tile.
+                    const prevWorld = prevState && prevState.worlds[i];
+                    const start = !last || (prevWorld && !prevWorld.in_progress) || Math.abs(last.x - x) + Math.abs(last.y - y) > 1;
+                    trail.push({ x, y, start });
+                    if (trail.length > TRAIL_LENGTH) trail.shift();
+                });
+            }
+            // The focused agent's trail through tile centres at foot level, fading
+            // with age. Each point gets its own short path from the midpoint before
+            // it to the midpoint after it, so the per-point alpha never overlaps.
+            function drawAgentTrail() {
+                const i = focusedAgent();
+                if (i === null || !isAgentVisible(i) || !agentTrails[i]) return;
+                const trail = agentTrails[i], n = trail.length;
+                if (n < 2) return;
+                const t = TILE_DEST_SIZE, px = (p) => (p.x + 0.5) * t, py = (p) => (p.y + 0.5) * t;
+                const width = t * 0.15;
+                simCtx.save();
+                simCtx.lineCap = "butt";
+                simCtx.lineJoin = "round";
+                [[theme.trailCasingRgb, width + t * 0.08, 0.7], [theme.trailRgb, width, 1]].forEach(([rgb, w, alphaScale]) => {
+                    for (let k = 0; k < n; k++) {
+                        const p = trail[k], prev = p.start ? null : trail[k - 1], next = trail[k + 1] && !trail[k + 1].start ? trail[k + 1] : null;
+                        if (!prev && !next) continue;
+                        // age 0 is the newest point.
+                        const fresh = 1 - (n - 1 - k) / TRAIL_LENGTH;
+                        simCtx.strokeStyle = `rgba(${rgb}, ${(0.2 + 0.8 * fresh) * alphaScale})`;
+                        simCtx.lineWidth = w * (0.5 + 0.5 * fresh);
+                        simCtx.beginPath();
+                        if (prev) simCtx.moveTo((px(prev) + px(p)) / 2, (py(prev) + py(p)) / 2);
+                        else simCtx.moveTo(px(p), py(p));
+                        simCtx.lineTo(px(p), py(p));
+                        if (next) simCtx.lineTo((px(p) + px(next)) / 2, (py(p) + py(next)) / 2);
+                        simCtx.stroke();
+                    }
+                });
+                simCtx.restore();
+            }
+            // Focus rings: solid under the selected agent, lighter and dashed under
+            // a hovered one. A dark under-stroke keeps them readable on any tile.
+            function drawAgentGroundMarks() {
+                const rings = [], f = focusedAgent();
+                if (selectedAgent !== null && selectedAgent < gameState.worlds.length && isAgentVisible(selectedAgent)) rings.push([selectedAgent, true]);
+                if (f !== null && f !== selectedAgent) rings.push([f, false]);
+                const t = TILE_DEST_SIZE;
+                rings.forEach(([i, selected]) => {
+                    const a = gameState.worlds[i].agent;
+                    if (!a) return;
+                    simCtx.save();
+                    simCtx.beginPath();
+                    simCtx.ellipse((a.ax + 0.5) * t, (a.ay + 0.86) * t, t * 0.46, t * 0.2, 0, 0, 2 * Math.PI);
+                    simCtx.fillStyle = `rgba(${theme.focusRgb}, ${selected ? 0.4 : 0.22})`;
+                    simCtx.fill();
+                    simCtx.lineWidth = Math.max(2, t / 12);
+                    simCtx.strokeStyle = "rgba(0, 0, 0, 0.45)";
+                    simCtx.stroke();
+                    simCtx.lineWidth = Math.max(1, t / 20);
+                    if (!selected) simCtx.setLineDash([t / 8, t / 12]);
+                    simCtx.strokeStyle = `rgba(${theme.focusRgb}, ${selected ? 1 : 0.85})`;
+                    simCtx.stroke();
+                    simCtx.restore();
+                });
+            }
+            // Status overlays: a log over the head while an agent carries it, and a
+            // splash where an agent drowned. Drawn in source pixels (16 per tile) so
+            // they stay on the tileset's pixel grid at any canvas size.
+            //
+            // How a drowning reaches the client: on the tick an agent steps into
+            // open water the server marks it drowned (in_progress: false) but leaves
+            // it on that water tile; the world resets on the next tick. Each poll is
+            // exactly one tick, so a world that has just stopped being in progress
+            // while standing in the river is a drowning at that tile (home is past
+            // the far bank). The splash keeps its own copy of the tile and runs on
+            // wall-clock time, so it outlives the reset and ignores the sim speed.
+            const RIVER_WATER_COLS = 3; // engine RIVER_WATER_WIDTH, right of the bank at river_start_col
+            const SPLASH_MS = 900;
+            const SPLASH_DROPS = [
+                { vx: -7, vy: -13 }, { vx: -3, vy: -17 }, { vx: 0, vy: -19 }, { vx: 3, vy: -16 },
+                { vx: 7, vy: -12 }, { vx: -10, vy: -8 }, { vx: 10, vy: -9 },
+            ];
+            let activeSplashes = [];
+            function updateStatusEffects(prevState, newState) {
+                if (!prevState) {
+                    activeSplashes = [];
+                    return;
+                }
+                const now = performance.now(), riverStartCol = newState.river_start_col;
+                newState.worlds.forEach((world, i) => {
+                    const prev = prevState.worlds[i];
+                    if (!prev || !prev.in_progress || world.in_progress) return;
+                    const { ax, ay } = world.agent;
+                    if (ax <= riverStartCol || ax > riverStartCol + RIVER_WATER_COLS) return;
+                    activeSplashes.push({ agent: i, ax, ay, start: now });
+                });
+            }
+            function isCarryingLog(world) {
+                // manager_state is (has_bridge_piece, bridge_placed, has_crossed).
+                return !!(world.manager_state && world.manager_state[0]);
+            }
+            function drawAgentStatusOverlays() {
+                const px = TILE_DEST_SIZE / TILE_SOURCE_SIZE;
+                agentDrawOrder().forEach((i) => {
+                    const world = gameState.worlds[i];
+                    if (!isAgentVisible(i) || !isCarryingLog(world)) return;
+                    simCtx.save();
+                    simCtx.globalAlpha = agentAlpha(i);
+                    drawCarriedLog(world.agent, px);
+                    simCtx.restore();
+                });
+                const now = performance.now();
+                activeSplashes = activeSplashes.filter((s) => now - s.start < SPLASH_MS);
+                activeSplashes.forEach((s) => {
+                    if (!isAgentVisible(s.agent)) return;
+                    simCtx.save();
+                    simCtx.globalAlpha = agentAlpha(s.agent);
+                    drawSplash(s, (now - s.start) / SPLASH_MS, px);
+                    simCtx.restore();
+                });
+            }
+            // The ground log (three bridge tiles, 48x16) shrunk to 18x6 and centred
+            // on the column, sitting just above the head (heads start ~6px into
+            // the upper sprite tile). Clamped so it stays on the canvas on row 0-1.
+            function drawCarriedLog(agent, px) {
+                const w = 18 * px, h = 6 * px;
+                const x = agent.ax * TILE_DEST_SIZE + (TILE_SOURCE_SIZE * px - w) / 2;
+                const y = Math.max(0, (agent.ay - 1) * TILE_DEST_SIZE - px);
+                const first = TILE_MAP.bridge_asset[0];
+                simCtx.imageSmoothingEnabled = false;
+                simCtx.drawImage(tileSheet, first.x * TILE_SOURCE_SIZE, first.y * TILE_SOURCE_SIZE,
+                    TILE_MAP.bridge_asset.length * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+            }
+            // t runs 0..1 over SPLASH_MS: the river's ripple tiles play on the tile
+            // while two rings spread across the water and droplets arc up and fall.
+            function drawSplash(s, t, px) {
+                const ox = s.ax * TILE_DEST_SIZE, oy = s.ay * TILE_DEST_SIZE;
+                const baseAlpha = simCtx.globalAlpha;
+                const dot = (x, y, size) => simCtx.fillRect(ox + Math.round(x) * px, oy + Math.round(y) * px, size * px, size * px);
+                const ripple = TILE_MAP.water_ripple[Math.min(TILE_MAP.water_ripple.length - 1, Math.floor(t * TILE_MAP.water_ripple.length))];
+                simCtx.drawImage(tileSheet, ripple.x * TILE_SOURCE_SIZE, ripple.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, ox, oy, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                [0, 0.25].forEach((delay) => {
+                    const rt = (t - delay) / (1 - delay);
+                    if (rt <= 0) return;
+                    const rx = 3 + 10 * rt, ry = rx * 0.45;
+                    simCtx.globalAlpha = baseAlpha * (1 - rt);
+                    simCtx.fillStyle = "#e8f6ff";
+                    const steps = Math.ceil(rx * 3);
+                    for (let k = 0; k < steps; k++) {
+                        const a = (k / steps) * Math.PI * 2;
+                        dot(8 + Math.cos(a) * rx, 10 + Math.sin(a) * ry, 1);
+                    }
+                });
+                const dt = Math.min(t / 0.7, 1);
+                if (dt < 1) {
+                    simCtx.globalAlpha = baseAlpha * Math.min(1, 3 * (1 - dt));
+                    SPLASH_DROPS.forEach((d, k) => {
+                        const y = 9 + d.vy * dt * 1.6 + 30 * dt * dt;
+                        if (y > 11) return;
+                        simCtx.fillStyle = k % 2 ? "#9ad7ff" : "#ffffff";
+                        dot(7 + d.vx * dt * 1.2, y, 2);
+                    });
+                }
+            }
+            function drawAgentSprite(world, i) {
+                const agent = world.agent;
+                const anim_frames = CHAR_SPRITE_MAP[agent.last_action];
+                if (!anim_frames) return;
+                const current_frame_index = Math.floor(agent.animation_frame / 4) % anim_frames.length;
+                if (i > 0) {
+                    const sheet = agentSheets[(i - 1) % agentSheets.length];
+                    const { w, h, count } = AGENT_SHEET_FRAME;
+                    const scale = TILE_DEST_SIZE / TILE_SOURCE_SIZE;
+                    simCtx.drawImage(sheet, (current_frame_index % count) * w, AGENT_SHEET_ROWS[agent.last_action] * h, w, h,
+                        agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE + AGENT_SHEET_FOOT_OFFSET * scale, w * scale, h * scale);
+                    return;
+                }
+                const frame = anim_frames[current_frame_index];
+                simCtx.drawImage(charSheet, frame.bottom.x * TILE_SOURCE_SIZE, frame.bottom.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, agent.ay * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                simCtx.drawImage(charSheet, frame.top.x * TILE_SOURCE_SIZE, frame.top.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
             }
             function drawQValueVisualization() {
                 qCtx.fillStyle = theme.canvasBg;
@@ -958,17 +1281,69 @@
                         milestoneElements[key].textContent = gameState.milestones[key];
                 }
             }
-            function updateAgents() {
-                const rows = gameState.worlds.map((world, i) => {
-                    const row = el("div", "agent-row");
-                    row.appendChild(el("span", world.in_progress ? "dot" : "dot done"));
-                    row.appendChild(el("span", "id", `A${String(i + 1).padStart(2, "0")}`));
-                    row.appendChild(el("span", "cmd", world.subgoal || "choosing…"));
-                    row.appendChild(el("span", "id", (world.manager_state || []).join("")));
-                    return row;
-                });
-                agentListEl.replaceChildren(...rows);
+            // Rows are built once per agent count and then updated in place, so
+            // hover, keyboard focus and clicks survive the per-tick refresh.
+            const EYE_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">'
+                + '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"></path><circle class="eye-on" cx="8" cy="8" r="2"></circle>'
+                + '<path class="eye-off" d="M2.5 13.5l11-11"></path></svg>';
+            function buildAgentRow(i) {
+                const id = `A${String(i + 1).padStart(2, "0")}`;
+                const row = el("div", "agent-row");
+                row.dataset.index = i;
+                const vis = el("button", "agent-vis");
+                vis.type = "button";
+                vis.innerHTML = EYE_ICON;
+                vis.setAttribute("aria-label", `Show ${id} on map`);
+                vis.title = `Show or hide ${id} on the map`;
+                const select = el("button", "agent-select");
+                select.type = "button";
+                select.title = `Highlight ${id} on the map`;
+                select.append(el("span", "dot"), el("span", "id", id), el("span", "cmd"), el("span", "id state"));
+                row.append(vis, select);
+                return row;
             }
+            function updateAgents() {
+                const worlds = gameState.worlds;
+                if (agentListEl.children.length !== worlds.length) {
+                    pruneAgentFocus(worlds.length);
+                    agentListEl.replaceChildren(...worlds.map((_, i) => buildAgentRow(i)));
+                }
+                worlds.forEach((world, i) => {
+                    const row = agentListEl.children[i];
+                    row.querySelector(".dot").className = world.in_progress ? "dot" : "dot done";
+                    row.querySelector(".cmd").textContent = world.subgoal || "choosing…";
+                    row.querySelector(".state").textContent = (world.manager_state || []).join("");
+                });
+                syncAgentRows();
+            }
+            // Reflects selection, hover and visibility on the rows; cheap enough to
+            // call on every change, including while paused.
+            function syncAgentRows() {
+                Array.from(agentListEl.children).forEach((row, i) => {
+                    const visible = isAgentVisible(i);
+                    row.classList.toggle("selected", selectedAgent === i);
+                    row.classList.toggle("hovered", hoveredAgent === i && visible);
+                    row.classList.toggle("hidden", !visible);
+                    row.querySelector(".agent-select").setAttribute("aria-pressed", String(selectedAgent === i));
+                    row.querySelector(".agent-vis").setAttribute("aria-pressed", String(visible));
+                });
+            }
+            agentListEl.addEventListener("click", (e) => {
+                const row = e.target.closest(".agent-row");
+                if (!row) return;
+                const i = Number(row.dataset.index);
+                if (e.target.closest(".agent-vis")) setAgentVisible(i, !isAgentVisible(i));
+                else if (e.target.closest(".agent-select")) {
+                    // Picking a hidden agent brings it back so there is something to highlight.
+                    if (!isAgentVisible(i)) setAgentVisible(i, true);
+                    selectAgent(selectedAgent === i ? null : i);
+                }
+            });
+            agentListEl.addEventListener("pointerover", (e) => {
+                const row = e.target.closest(".agent-row");
+                hoverAgent(row ? Number(row.dataset.index) : null);
+            });
+            agentListEl.addEventListener("pointerleave", () => hoverAgent(null));
             const MAX_EVENT_ROWS = 50;
             function updateEvents() {
                 const fresh = (gameState.events || []).filter((e) => e.id > lastEventId);
@@ -1179,6 +1554,7 @@
 
                 if (response.ok) {
                     gameState = await response.json();
+                    onStateUpdate(null, gameState);
                     qValueData = managerQValueData = null;
                     lastEventId = -1;
                     eventStreamEl.replaceChildren();
@@ -1196,6 +1572,7 @@
                     simWorker.onmessage = function (e) {
                         const { type, message, gameState: newGameState, qValueData: newQValueData, managerQValueData: newManagerQValueData } = e.data;
                         if (type === "update") {
+                            onStateUpdate(gameState, newGameState);
                             gameState = newGameState;
                             stateDirty = true;
                         } else if (type === "all_q_values_update") {
