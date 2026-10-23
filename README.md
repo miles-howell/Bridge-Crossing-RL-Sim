@@ -34,10 +34,10 @@ The application is structured as a Django web project, with core components orga
 This architecture faces the same issue as many other hierarchical models. Training two individual, disconnected Q-value estimators can be unreliable when working towards a shared goal. A series of simple mistakes on the worker's part, can result in major Q-value divergence from the optpimal strategy for the manager, even if an optimal strategy has already been developed. The margin for error on either of the models' parts is extremely thin with this setup. 
 
 
-We solve for this by implementing a "profit-sharing" technique, reminiscent of Potential Based Reward Shaping (PBRS). The manager is rewarded when an issued command results in a positive change in the environment's state (Manager issues "GOTO_LOG" command, environment state updates to "HAS_LOG", Manager is rewarded). For the sake of analogy, this reward is considered profit, hence how it knows it is doing a good job or not. The worker, who has been a loyal employee, earns a % amount of profit each step. This can be either positive or negative depending on the Q-value the manager currently estimates for that outcome. This solution solves the discrepency of the two agent's goals.
+We address this by giving each agent a reward it fully controls, so neither is graded on the other's decisions. The manager is rewarded (+100) when an issued command results in a positive change in the environment's state (Manager issues "GOTO_LOG", environment state updates to "HAS_LOG"), and penalized (-100) when it doesn't. The worker is rewarded for reaching the coordinate it was assigned, whether or not that order was a good one. The worker's network is goal-conditioned, so it doesn't need to know *why* a coordinate matters, only how to get there; judging which coordinate is worth visiting is the manager's job. A worker mistake still costs the manager a failed subgoal, but the manager also sees whether its last subgoal failed, so it can retry instead of abandoning a correct plan.
 
+The worker deliberately gets no share of the task milestone rewards. Each milestone fires on the same tile as the goal that asks for it, so paying it to the worker would only duplicate its goal bonus, make some goals worth far more than others inside one shared network, and credit milestones hit under a goal that didn't ask for them.
 
-Using this method, the two agents are much better equipped to solve a complex problem together. The worker still uses Hindsight Experience Replay (HER) to learn navigation skills, but also benefits from the major milestone rewards, subsequently "understanding" the actual goal. For example, the worker had no way of telling why (2,9) is a good place to navigate to prior to this implementation. The "profti-share" solution differs from a more basic linear sharing of the milestone rewards, which could possibly result in exploding Q-value estimates and inconsistent learning behavior. This subtle signal seems to be enough to guide the worker in the right direction.
 
 ### 2. Reinforcement Learning Implementation Details
 
@@ -54,7 +54,7 @@ The `WorkerAgent` incorporates Hindsight Experience Replay (HER) to improve samp
 
 #### 2.3 Reward Functions
 
-* **Worker Reward:** A dense reward mechanism is employed. A step penalty (`step_penalty`) is applied at each time step. Positive rewards are granted for significant progress, such as picking up the bridge piece (+100), placing the bridge (+100), and crossing the river (+100). A large negative reward (-1000) is incurred if the agent drowns.
+* **Worker Reward:** A step penalty (`step_penalty`) is applied at each time step, plus a small count-based novelty bonus for rarely visited tiles. Reaching the assigned sub-goal coordinate earns `WORKER_SUBGOAL_BONUS` (+100), regardless of whether that sub-goal advanced the task. Drowning earns `DROWNING_PENALTY` (-200) and ends the episode. Task milestones (picking up the log, placing the bridge, crossing, reaching home) add nothing to the worker's reward. Hindsight relabels (see 2.2) use 0 for reaching the relabeled goal and -10 per step otherwise.
 * **Manager Reward:** The Manager receives a positive reward (+100) if its chosen sub-goal is achieved by the Worker within `WORKER_MAX_STEPS`, and a negative reward (-100) otherwise.
 
 #### 2.4 Environment

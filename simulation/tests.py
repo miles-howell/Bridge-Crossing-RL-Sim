@@ -1,7 +1,8 @@
 from django.test import SimpleTestCase
 
 from .engine import (
-    AgentState, ManagerAgent, SimulationEngine, WorkerAgent, WORKER_SUBGOAL_BONUS,
+    AgentState, DROWNING_PENALTY, ManagerAgent, SimulationEngine, WorkerAgent,
+    WORKER_SUBGOAL_BONUS,
 )
 
 
@@ -61,7 +62,7 @@ class EngineRewardTests(SimpleTestCase):
                 self.assertEqual(self.engine.milestones['home'], 1)
                 self.assertEqual(self._manager_reward(), 100)
                 last = self.engine.worker.memory.memory[-1]
-                self.assertGreater(last[2], 1000 + WORKER_SUBGOAL_BONUS - 50)
+                self.assertGreater(last[2], WORKER_SUBGOAL_BONUS - 50)
                 self.assertTrue(last[5])
 
     def test_home_under_wrong_subgoal_ends_episode_without_credit(self):
@@ -73,10 +74,10 @@ class EngineRewardTests(SimpleTestCase):
         self.assertEqual(self._manager_reward(), -100)
         # Terminal for the manager.
         self.assertTrue(self.manager_updates[0][4])
-        # No +1000 for the worker under the far-bank goal...
+        # No reward for the worker under the far-bank goal...
         primary = [e for e in self.engine.worker.memory.memory if e[4] == self.world.subgoal_locations['GOTO_FAR_BANK']]
         self.assertEqual(len(primary), 1)
-        self.assertLess(primary[0][2], 100)
+        self.assertLess(primary[0][2], 50)
         # ...but the hindsight relabel records reaching the house tile.
         relabeled = [e for e in self.engine.worker.memory.memory if e[4] == (15, 2)]
         self.assertEqual(len(relabeled), 1)
@@ -98,3 +99,35 @@ class EngineRewardTests(SimpleTestCase):
         self.assertEqual(len(entries), 1)
         self.assertGreater(entries[0][2], WORKER_SUBGOAL_BONUS - 50)
         self.assertTrue(entries[0][5])
+
+    def test_milestone_adds_nothing_to_worker_reward(self):
+        world = self.world
+        log = world.subgoal_locations['GOTO_LOG']
+        # Walk onto the log while assigned a different goal.
+        world.agent.update(ax=log[0] - 1, ay=log[1])
+        world.current_subgoal_name = 'GOTO_RIVER'
+        world.current_subgoal_coord = world.subgoal_locations['GOTO_RIVER']
+        world.last_manager_state = self.engine._get_manager_state(world)
+        self._step("RIGHT")
+
+        self.assertTrue(world.agent['has_bridge_piece'])
+        self.assertEqual(self.engine.milestones['picked_up'], 1)
+        # The subtask is still running (GOTO_RIVER not reached), so the step
+        # sits in the trajectory with only step penalty + novelty bonus.
+        self.assertEqual(len(world.subgoal_trajectory), 1)
+        self.assertLess(world.subgoal_trajectory[0][2], 50)
+
+    def test_drowning_penalty(self):
+        world = self.world
+        x = world.river_start_col + 1
+        world.agent.update(ax=x - 1, ay=world.bridge_y_pos_tiles + 1)
+        world.current_subgoal_name = 'GOTO_RIVER'
+        world.current_subgoal_coord = world.subgoal_locations['GOTO_RIVER']
+        world.last_manager_state = self.engine._get_manager_state(world)
+        self._step("RIGHT")
+
+        self.assertEqual(world.agent['status'], AgentState.DROWNED)
+        primary = [e for e in self.engine.worker.memory.memory if e[4] == world.current_subgoal_coord]
+        self.assertEqual(len(primary), 1)
+        self.assertLess(primary[0][2], -DROWNING_PENALTY + 50)
+        self.assertTrue(primary[0][5])

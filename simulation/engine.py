@@ -32,6 +32,11 @@ GRAD_CLIP_NORM = 1.0
 # manager's own reward (which IS gated on task-level correctness): the
 # worker's job is to execute directives reliably, not to judge them.
 WORKER_SUBGOAL_BONUS = 100
+# The only task-level event the worker is penalized for, since it alone
+# controls whether it steps into the water. Sized to clearly outweigh
+# WORKER_SUBGOAL_BONUS, so a shortcut through the river never pays, without
+# dwarfing every other worker reward in the shared network and loss.
+DROWNING_PENALTY = 200
 NOVELTY_BONUS_SCALE = 5
 
 
@@ -162,7 +167,7 @@ class WorkerAgent:
         self.optimizer.zero_grad()
         loss.backward()
         # Bounds the size of a single update. Without this, a single
-        # large-magnitude reward (e.g. the -1000 drowning penalty) can push
+        # large-magnitude reward (e.g. the drowning penalty) can push
         # enough ReLU units permanently negative in one step to collapse the
         # network's representational capacity ("dying ReLU").
         nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=GRAD_CLIP_NORM)
@@ -384,7 +389,7 @@ class SimulationEngine:
     def _compute_hindsight_reward(self, achieved_goal, desired_goal):
         # -10 rather than the more typical HER -1: these hindsight
         # experiences share a replay buffer, network, and MSE loss with
-        # primary experiences carrying rewards up to +-1000+, so a -1 signal
+        # primary experiences carrying rewards of +100 and -200, so a -1 signal
         # is negligible by comparison and barely shapes the gradient at all.
         return 0 if achieved_goal == desired_goal else -10
 
@@ -425,15 +430,18 @@ class SimulationEngine:
             # reward (computed separately below from new_milestone_achieved).
             reward += self.worker.novelty_bonus(current_pos)
 
-            # --- FINAL REWARD LOGIC REFACTOR ---
-            # This logic now strictly ties the manager's reward to the achievement of a NEW milestone.
-
-            # Check for milestone events and give one-time rewards
+            # Milestone events advance the task state and decide the
+            # manager's reward (via new_milestone_achieved), but add nothing
+            # to the worker's: it's paid for reaching its assigned coordinate
+            # (WORKER_SUBGOAL_BONUS, below), which for each milestone is the
+            # same tile. Paying it again here only gave some goals larger
+            # rewards than others and credited milestones hit under a goal
+            # that didn't ask for them.
             # Event: Pick up the log
             if not world.milestones_rewarded['log_picked_up'] and world.bridge_piece:
                 if current_pos == world.subgoal_locations['GOTO_LOG']:
                     agent['has_bridge_piece'] = True; world.bridge_piece = None
-                    self.milestones['picked_up'] += 1; reward += 100
+                    self.milestones['picked_up'] += 1
                     world.milestones_rewarded['log_picked_up'] = True
                     if world.current_subgoal_name == 'GOTO_LOG':
                         new_milestone_achieved = True
@@ -443,7 +451,7 @@ class SimulationEngine:
                 if current_pos == world.subgoal_locations['GOTO_RIVER']:
                     world.placed_bridge = { "ax": world.river_start_col + RIVER_BORDER_WIDTH, "ay": world.bridge_y_pos_tiles }
                     agent['has_bridge_piece'] = False
-                    self.milestones['placed'] += 1; reward += 100
+                    self.milestones['placed'] += 1
                     world.milestones_rewarded['bridge_placed'] = True
                     if world.current_subgoal_name == 'GOTO_RIVER':
                         new_milestone_achieved = True
@@ -456,30 +464,27 @@ class SimulationEngine:
                 # happened via the bridge. Same x threshold as GOTO_FAR_BANK.
                 if agent['ax'] >= world.subgoal_locations['GOTO_FAR_BANK'][0]:
                     agent['has_crossed'] = True
-                    self.milestones['crossed'] += 1; reward += 100
+                    self.milestones['crossed'] += 1
                     world.milestones_rewarded['crossed_bridge'] = True
                     if world.current_subgoal_name == 'GOTO_FAR_BANK':
                         new_milestone_achieved = True
 
             # Event: Reach Home (This is a terminal state, so no reward flag is needed)
             # Like the milestones above, the event itself fires under any
-            # subgoal, but only GOTO_HOUSE earns credit. The +1000 also goes
-            # to the worker only under GOTO_HOUSE: under any other goal it
-            # would teach the worker "given goal X, walk to the house". The
-            # hindsight relabel below still gives it the trajectory under
-            # the tile it actually reached.
+            # subgoal, but only GOTO_HOUSE earns the manager credit. The
+            # hindsight relabel below still gives the worker the trajectory
+            # under the tile it actually reached.
             if agent['has_crossed'] and current_pos in world.house_tiles:
                 agent['status'] = AgentState.HOME
                 self.milestones['home'] += 1
                 if world.current_subgoal_name == 'GOTO_HOUSE':
-                    reward += 1000
                     new_milestone_achieved = True
 
             # Drowning is always possible
             is_in_river_area = world.river_start_col < agent['ax'] < world.river_start_col + RIVER_TOTAL_WIDTH - 1
             if is_in_river_area:
                 is_on_bridge = world.placed_bridge and world.placed_bridge['ay'] == agent['ay']
-                if not is_on_bridge: agent['status'] = AgentState.DROWNED; reward -= 1000
+                if not is_on_bridge: agent['status'] = AgentState.DROWNED; reward -= DROWNING_PENALTY
 
             # Determine if the subtask is over. Reaching the assigned tile ends
             # it even when no milestone fired (e.g. GOTO_FAR_BANK after
