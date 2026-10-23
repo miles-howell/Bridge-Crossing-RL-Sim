@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero.gif" width="100%" alt="Nigel's Quest: Nigel walks a 20 by 12 grid, picks up a log, lays it across the river as a bridge, crosses and walks into the house, while the manager's current sub-goal updates beside him">
+  <img src="./assets/readme/hero-illustrated.png" width="100%" alt="Nigel's Quest: a pixel-art Nigel holds a log over his head beside a river, about to bridge it to reach the red-roofed cottage on the far bank">
 </p>
 
 **Bridge-Crossing-RL-Sim** is a Django app that trains a two-level reinforcement learning agent and lets you watch it learn. Each agent, starting with Nigel, has to pick up a log, lay it across a river, cross, and walk into a house. A **manager** network decides which of those steps to attempt next; a **worker** network learns how to walk to wherever the manager points. Training runs on the server and the browser shows every step live.

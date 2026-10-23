@@ -75,6 +75,22 @@ def sprite_frame(direction, step):
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+def title_block(footer):
+    """The left half of the hero: category, name, promise, and a footer line."""
+    return f'''
+  <g id="title-block" transform="translate(64 0)">
+    <text x="0" y="86" font-family="{MONO}" font-size="18" letter-spacing="2" fill="{ACCENT}">HIERARCHICAL RL · DQN + HER</text>
+    <text x="0" y="158" font-family="{SANS}" font-size="64" font-weight="800" fill="{TEXT}">Nigel’s Quest</text>
+    <text x="0" y="198" font-family="{MONO}" font-size="22" fill="{MUTED}">bridge-crossing-rl-sim</text>
+    <text x="0" y="256" font-family="{SANS}" font-size="24" fill="{TEXT}">A manager picks the next sub-goal.</text>
+    <text x="0" y="290" font-family="{SANS}" font-size="24" fill="{TEXT}">A worker learns to walk there.</text>
+    <text x="0" y="324" font-family="{SANS}" font-size="24" fill="{MUTED}">Watch them learn to build a bridge home.</text>
+    <g transform="translate(0 358)" font-family="{MONO}" font-size="16" fill="{MUTED}">
+      {footer}
+    </g>
+  </g>'''
+
+
 def hero(state=None):
     """The static hero, or with `state` one frame of the animated hero.
 
@@ -164,18 +180,7 @@ def hero(state=None):
         footer = (f'<text x="0" y="0">manager → <tspan fill="{ACCENT}" font-weight="700">'
                   f'{state["status"]}</tspan></text>')
 
-    left = f'''
-  <g id="title-block" transform="translate(64 0)">
-    <text x="0" y="86" font-family="{MONO}" font-size="18" letter-spacing="2" fill="{ACCENT}">HIERARCHICAL RL · DQN + HER</text>
-    <text x="0" y="158" font-family="{SANS}" font-size="64" font-weight="800" fill="{TEXT}">Nigel’s Quest</text>
-    <text x="0" y="198" font-family="{MONO}" font-size="22" fill="{MUTED}">bridge-crossing-rl-sim</text>
-    <text x="0" y="256" font-family="{SANS}" font-size="24" fill="{TEXT}">A manager picks the next sub-goal.</text>
-    <text x="0" y="290" font-family="{SANS}" font-size="24" fill="{TEXT}">A worker learns to walk there.</text>
-    <text x="0" y="324" font-family="{SANS}" font-size="24" fill="{MUTED}">Watch them learn to build a bridge home.</text>
-    <g transform="translate(0 358)" font-family="{MONO}" font-size="16" fill="{MUTED}">
-      {footer}
-    </g>
-  </g>'''
+    left = title_block(footer)
 
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" role="img" aria-labelledby="title desc">
   <title id="title">Nigel’s Quest: Bridge-Crossing-RL-Sim</title>
@@ -185,6 +190,39 @@ def hero(state=None):
   <g id="world-map">
     {"".join(m)}
   </g>
+</svg>
+'''
+
+
+# The generated illustration (source/hero-illustration.jpg) has a ~100px
+# pink frame around the scene; this is the scene, inset a few pixels so no
+# frame colour bleeds in.
+ILLUSTRATION = "hero-illustration.jpg"
+ILLUSTRATION_SIZE = (2000, 1116)
+ILLUSTRATION_SCENE = (102, 55, 1897, 1060)
+
+
+def hero_illustrated():
+    """Layout for the illustrated hero: the same title block, with the
+    generated scene in place of the map. It links the JPEG relatively, so
+    it lives next to it in source/ and is published as hero-illustrated.png
+    by build_hero_png.py."""
+    W, H = 1200, 420
+    x, y, w = 600, 54, 558
+    l, t, r, b = ILLUSTRATION_SCENE
+    s = w / (r - l)
+    h = round((b - t) * s)
+    footer = '<text x="0" y="0">Django · PyTorch · trains live in your browser</text>'
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{W}" height="{H}" viewBox="0 0 {W} {H}" role="img" aria-labelledby="title desc">
+  <title id="title">Nigel’s Quest: Bridge-Crossing-RL-Sim</title>
+  <desc id="desc">Pixel-art illustration of Nigel holding a log over his head beside a river, with a red-roofed cottage on the far bank.</desc>
+  <defs><clipPath id="scene"><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="10"/></clipPath></defs>
+  <rect width="{W}" height="{H}" rx="20" fill="{BG}"/>
+  {title_block(footer)}
+  <g id="illustration" clip-path="url(#scene)">
+    <image x="{x - l * s:.2f}" y="{y - t * s:.2f}" width="{ILLUSTRATION_SIZE[0] * s:.2f}" height="{ILLUSTRATION_SIZE[1] * s:.2f}" href="{ILLUSTRATION}"/>
+  </g>
+  <text x="{x}" y="{y + h + 28}" font-family="{MONO}" font-size="16" fill="{MUTED}">illustration · the live app is pictured below</text>
 </svg>
 '''
 
@@ -255,4 +293,5 @@ if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "hero.svg").write_text(hero())
     (OUT / "how-it-works.svg").write_text(how_it_works())
+    (OUT / "source" / "hero-illustrated-layout.svg").write_text(hero_illustrated())
     print("wrote", OUT / "hero.svg", OUT / "how-it-works.svg")

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Nigel’s Quest: Bridge-Crossing-RL-Sim</title>
+  <desc id="desc">Pixel-art illustration of Nigel holding a log over his head beside a river, with a red-roofed cottage on the far bank.</desc>
+  <defs><clipPath id="scene"><rect x="600" y="54" width="558" height="312" rx="10"/></clipPath></defs>
+  <rect width="1200" height="420" rx="20" fill="#0e1116"/>
+  
+  <g id="title-block" transform="translate(64 0)">
+    <text x="0" y="86" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" letter-spacing="2" fill="#f5a524">HIERARCHICAL RL · DQN + HER</text>
+    <text x="0" y="158" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="64" font-weight="800" fill="#e6eaf0">Nigel’s Quest</text>
+    <text x="0" y="198" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="22" fill="#8b95a5">bridge-crossing-rl-sim</text>
+    <text x="0" y="256" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="24" fill="#e6eaf0">A manager picks the next sub-goal.</text>
+    <text x="0" y="290" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="24" fill="#e6eaf0">A worker learns to walk there.</text>
+    <text x="0" y="324" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="24" fill="#8b95a5">Watch them learn to build a bridge home.</text>
+    <g transform="translate(0 358)" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#8b95a5">
+      <text x="0" y="0">Django · PyTorch · trains live in your browser</text>
+    </g>
+  </g>
+  <g id="illustration" clip-path="url(#scene)">
+    <image x="568.29" y="36.90" width="621.73" height="346.92" href="hero-illustration.jpg"/>
+  </g>
+  <text x="600" y="394" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#8b95a5">illustration · the live app is pictured below</text>
+</svg>
