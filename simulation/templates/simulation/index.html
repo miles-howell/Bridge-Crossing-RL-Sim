@@ -52,6 +52,7 @@
                 --pill-muted: #8b95a5;
                 --pill-track: #1e3a2a;
                 --spark: #38bdf8;
+                --focus-rgb: 245, 165, 36;
                 --font-sans: "Inter Tight", system-ui, sans-serif;
                 --font-mono: "JetBrains Mono", ui-monospace, monospace;
                 --head-font: var(--font-mono);
@@ -88,6 +89,7 @@
                 --pill-muted: rgba(255, 255, 255, 0.85);
                 --pill-track: rgba(255, 255, 255, 0.3);
                 --spark: #1f4fd8;
+                --focus-rgb: 31, 79, 216;
                 --font-sans: "Inter", system-ui, sans-serif;
                 --font-mono: "Roboto Mono", ui-monospace, monospace;
                 --head-font: var(--font-sans);
@@ -300,12 +302,29 @@
             .agent-row {
                 display: flex;
                 align-items: center;
-                gap: 10px;
+                gap: 4px;
                 font-family: var(--font-mono);
                 font-size: 12px;
-                padding: 4px 0;
                 border-bottom: 1px solid var(--rule);
             }
+            .agent-row button {
+                display: flex;
+                align-items: center;
+                min-height: 28px;
+                border: 0;
+                border-radius: 4px;
+                background: none;
+                color: inherit;
+                font: inherit;
+            }
+            .agent-row button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+            .agent-select { flex: 1; gap: 10px; min-width: 0; padding: 0 6px; text-align: left; }
+            .agent-vis { justify-content: center; width: 28px; padding: 0; color: var(--muted); }
+            .agent-vis:hover { color: var(--text); }
+            .agent-vis[aria-pressed="true"] .eye-off, .agent-vis[aria-pressed="false"] .eye-on { display: none; }
+            .agent-row.hovered .agent-select { background: var(--surface-2); }
+            .agent-row.selected .agent-select { background: rgba(var(--focus-rgb), 0.16); box-shadow: inset 2px 0 0 rgb(var(--focus-rgb)); }
+            .agent-row.hidden .agent-select { opacity: 0.45; }
             .agent-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pos); }
             .agent-row .dot.done { background: var(--muted); }
             .agent-row .id { color: var(--muted); }
@@ -575,6 +594,7 @@
                     qPosRgb: v("--q-pos-rgb"),
                     qNegRgb: v("--q-neg-rgb"),
                     font: v("--font-sans"),
+                    focusRgb: v("--focus-rgb"),
                 };
             }
             function setTheme(name, persist) {
@@ -732,16 +752,79 @@
             }
             // Agent focus, shared by the map and the Agents panel. Indices are
             // world indices (A01 = 0). Display only: nothing here reaches the server.
+            // Selection and hidden agents survive a reset unless the new run has
+            // fewer agents; hiding an agent drops its selection.
             let selectedAgent = null,
                 hoveredAgent = null;
             const hiddenAgents = new Set();
-            // The agent the map currently emphasises: hover wins over selection.
+            // The agent the map currently emphasises: hover wins over selection,
+            // and a hidden or out-of-range agent is never focused.
             function focusedAgent() {
-                return hoveredAgent ?? selectedAgent;
+                const n = gameState && gameState.worlds ? gameState.worlds.length : 0;
+                return [hoveredAgent, selectedAgent].find((i) => i !== null && i < n && isAgentVisible(i)) ?? null;
             }
             function isAgentVisible(i) {
                 return !hiddenAgents.has(i);
             }
+            function selectAgent(i) {
+                selectedAgent = i;
+                syncAgentRows();
+            }
+            function hoverAgent(i) {
+                if (hoveredAgent === i) return;
+                hoveredAgent = i;
+                syncAgentRows();
+            }
+            function setAgentVisible(i, visible) {
+                if (visible) hiddenAgents.delete(i);
+                else {
+                    hiddenAgents.add(i);
+                    if (selectedAgent === i) selectedAgent = null;
+                }
+                syncAgentRows();
+            }
+            // Drop focus state that points past the end of a smaller new run.
+            function pruneAgentFocus(n) {
+                if (selectedAgent !== null && selectedAgent >= n) selectedAgent = null;
+                if (hoveredAgent !== null && hoveredAgent >= n) hoveredAgent = null;
+                hiddenAgents.forEach((i) => { if (i >= n) hiddenAgents.delete(i); });
+            }
+
+            // Map picking. The last pointer position is kept so the hover follows
+            // agents that walk under (or away from) a cursor that isn't moving.
+            let mapPointer = null;
+            function agentAt(point) {
+                if (!point || !gameState || !gameState.worlds) return null;
+                const col = point.x / TILE_DEST_SIZE, row = point.y / TILE_DEST_SIZE;
+                // Topmost first. A sprite covers its feet tile and the tile above.
+                const order = agentDrawOrder();
+                for (let k = order.length - 1; k >= 0; k--) {
+                    const i = order[k], a = gameState.worlds[i].agent;
+                    if (!isAgentVisible(i) || !a) continue;
+                    if (col >= a.ax && col < a.ax + 1 && row >= a.ay - 1 && row < a.ay + 1) return i;
+                }
+                return null;
+            }
+            function canvasPoint(e) {
+                const rect = simCanvas.getBoundingClientRect();
+                return { x: (e.clientX - rect.left) * simCanvas.width / rect.width, y: (e.clientY - rect.top) * simCanvas.height / rect.height };
+            }
+            function refreshMapHover() {
+                if (!mapPointer) return;
+                const hit = agentAt(mapPointer);
+                simCanvas.style.cursor = hit === null ? "" : "pointer";
+                hoverAgent(hit);
+            }
+            simCanvas.addEventListener("pointermove", (e) => {
+                mapPointer = canvasPoint(e);
+                refreshMapHover();
+            });
+            simCanvas.addEventListener("pointerleave", () => {
+                mapPointer = null;
+                simCanvas.style.cursor = "";
+                hoverAgent(null);
+            });
+            simCanvas.addEventListener("click", (e) => selectAgent(agentAt(canvasPoint(e))));
 
             // Called once per simulation tick with the previous and new state, for
             // anything that tracks history across ticks (trails, status effects).
@@ -769,12 +852,38 @@
             function agentDrawOrder() {
                 return gameState.worlds.map((_, i) => i);
             }
-            // Sprite opacity, e.g. to dim agents other than the focused one.
+            // Sprite opacity: with an agent focused, the others fade back.
             function agentAlpha(i) {
-                return 1;
+                const f = focusedAgent();
+                return f === null || f === i ? 1 : 0.35;
             }
             function drawAgentTrail() {}
-            function drawAgentGroundMarks() {}
+            // Focus rings: solid under the selected agent, lighter and dashed under
+            // a hovered one. A dark under-stroke keeps them readable on any tile.
+            function drawAgentGroundMarks() {
+                refreshMapHover();
+                const rings = [], f = focusedAgent();
+                if (selectedAgent !== null && selectedAgent < gameState.worlds.length && isAgentVisible(selectedAgent)) rings.push([selectedAgent, true]);
+                if (f !== null && f !== selectedAgent) rings.push([f, false]);
+                const t = TILE_DEST_SIZE;
+                rings.forEach(([i, selected]) => {
+                    const a = gameState.worlds[i].agent;
+                    if (!a) return;
+                    simCtx.save();
+                    simCtx.beginPath();
+                    simCtx.ellipse((a.ax + 0.5) * t, (a.ay + 0.86) * t, t * 0.46, t * 0.2, 0, 0, 2 * Math.PI);
+                    simCtx.fillStyle = `rgba(${theme.focusRgb}, ${selected ? 0.4 : 0.22})`;
+                    simCtx.fill();
+                    simCtx.lineWidth = Math.max(2, t / 12);
+                    simCtx.strokeStyle = "rgba(0, 0, 0, 0.45)";
+                    simCtx.stroke();
+                    simCtx.lineWidth = Math.max(1, t / 20);
+                    if (!selected) simCtx.setLineDash([t / 8, t / 12]);
+                    simCtx.strokeStyle = `rgba(${theme.focusRgb}, ${selected ? 1 : 0.85})`;
+                    simCtx.stroke();
+                    simCtx.restore();
+                });
+            }
             // Status overlays: a log over the head while an agent carries it, and a
             // splash where an agent drowned. Drawn in source pixels (16 per tile) so
             // they stay on the tileset's pixel grid at any canvas size.
@@ -1099,17 +1208,69 @@
                         milestoneElements[key].textContent = gameState.milestones[key];
                 }
             }
-            function updateAgents() {
-                const rows = gameState.worlds.map((world, i) => {
-                    const row = el("div", "agent-row");
-                    row.appendChild(el("span", world.in_progress ? "dot" : "dot done"));
-                    row.appendChild(el("span", "id", `A${String(i + 1).padStart(2, "0")}`));
-                    row.appendChild(el("span", "cmd", world.subgoal || "choosing…"));
-                    row.appendChild(el("span", "id", (world.manager_state || []).join("")));
-                    return row;
-                });
-                agentListEl.replaceChildren(...rows);
+            // Rows are built once per agent count and then updated in place, so
+            // hover, keyboard focus and clicks survive the per-tick refresh.
+            const EYE_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">'
+                + '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"></path><circle class="eye-on" cx="8" cy="8" r="2"></circle>'
+                + '<path class="eye-off" d="M2.5 13.5l11-11"></path></svg>';
+            function buildAgentRow(i) {
+                const id = `A${String(i + 1).padStart(2, "0")}`;
+                const row = el("div", "agent-row");
+                row.dataset.index = i;
+                const vis = el("button", "agent-vis");
+                vis.type = "button";
+                vis.innerHTML = EYE_ICON;
+                vis.setAttribute("aria-label", `Show ${id} on map`);
+                vis.title = `Show or hide ${id} on the map`;
+                const select = el("button", "agent-select");
+                select.type = "button";
+                select.title = `Highlight ${id} on the map`;
+                select.append(el("span", "dot"), el("span", "id", id), el("span", "cmd"), el("span", "id state"));
+                row.append(vis, select);
+                return row;
             }
+            function updateAgents() {
+                const worlds = gameState.worlds;
+                if (agentListEl.children.length !== worlds.length) {
+                    pruneAgentFocus(worlds.length);
+                    agentListEl.replaceChildren(...worlds.map((_, i) => buildAgentRow(i)));
+                }
+                worlds.forEach((world, i) => {
+                    const row = agentListEl.children[i];
+                    row.querySelector(".dot").className = world.in_progress ? "dot" : "dot done";
+                    row.querySelector(".cmd").textContent = world.subgoal || "choosing…";
+                    row.querySelector(".state").textContent = (world.manager_state || []).join("");
+                });
+                syncAgentRows();
+            }
+            // Reflects selection, hover and visibility on the rows; cheap enough to
+            // call on every change, including while paused.
+            function syncAgentRows() {
+                Array.from(agentListEl.children).forEach((row, i) => {
+                    const visible = isAgentVisible(i);
+                    row.classList.toggle("selected", selectedAgent === i);
+                    row.classList.toggle("hovered", hoveredAgent === i && visible);
+                    row.classList.toggle("hidden", !visible);
+                    row.querySelector(".agent-select").setAttribute("aria-pressed", String(selectedAgent === i));
+                    row.querySelector(".agent-vis").setAttribute("aria-pressed", String(visible));
+                });
+            }
+            agentListEl.addEventListener("click", (e) => {
+                const row = e.target.closest(".agent-row");
+                if (!row) return;
+                const i = Number(row.dataset.index);
+                if (e.target.closest(".agent-vis")) setAgentVisible(i, !isAgentVisible(i));
+                else if (e.target.closest(".agent-select")) {
+                    // Picking a hidden agent brings it back so there is something to highlight.
+                    if (!isAgentVisible(i)) setAgentVisible(i, true);
+                    selectAgent(selectedAgent === i ? null : i);
+                }
+            });
+            agentListEl.addEventListener("pointerover", (e) => {
+                const row = e.target.closest(".agent-row");
+                hoverAgent(row ? Number(row.dataset.index) : null);
+            });
+            agentListEl.addEventListener("pointerleave", () => hoverAgent(null));
             const MAX_EVENT_ROWS = 50;
             function updateEvents() {
                 const fresh = (gameState.events || []).filter((e) => e.id > lastEventId);
