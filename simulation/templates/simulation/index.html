@@ -131,7 +131,13 @@
                 white-space: nowrap;
             }
             .chip .label { color: var(--muted); margin-right: 4px; }
-            .chip .accent { color: var(--accent); }
+            /* Fixed-width numbers so changing values don't resize the chips
+               and reflow the header. */
+            .num { display: inline-block; text-align: right; font-variant-numeric: tabular-nums; }
+            #successRate { min-width: 6ch; }
+            #successSample { min-width: 5ch; }
+            #episodesCompleted { min-width: 7ch; }
+            #status { display: inline-block; min-width: 20ch; }
             .success-pill {
                 display: flex;
                 align-items: center;
@@ -317,12 +323,11 @@
                     <span class="chip"><span class="label">status</span><span id="status">loading assets…</span></span>
                     <span class="success-pill" title="Share of recent finished episodes (reached home vs. drowned) that reached home">
                         <span class="label">success</span>
-                        <strong id="successRate">—</strong>
+                        <strong class="num" id="successRate">—</strong>
                         <span class="success-track" aria-hidden="true"><span class="success-fill" id="successFill"></span></span>
-                        <span class="sample" id="successSample">n=0</span>
+                        <span class="sample num" id="successSample">n=0</span>
                     </span>
-                    <span class="chip"><span class="label">agent 1 cmd</span><span class="accent" id="currentCommand">—</span></span>
-                    <span class="chip"><span class="label">mgr steps</span><span id="episodesCompleted">0</span></span>
+                    <span class="chip"><span class="label">mgr steps</span><span class="num" id="episodesCompleted">0</span></span>
                 </div>
                 <div class="actions">
                     <button type="button" class="btn btn-icon" id="themeToggle" aria-label="Switch theme">
@@ -480,8 +485,7 @@
             };
             const successRateEl = document.getElementById("successRate"),
                 successFillEl = document.getElementById("successFill"),
-                successSampleEl = document.getElementById("successSample"),
-                currentCommandEl = document.getElementById("currentCommand");
+                successSampleEl = document.getElementById("successSample");
             const agentListEl = document.getElementById("agentList"),
                 eventStreamEl = document.getElementById("eventStream"),
                 managerTableEl = document.getElementById("managerTable");
@@ -875,8 +879,6 @@
                 successRateEl.textContent = rate === null || rate === undefined ? "—" : `${(rate * 100).toFixed(1)}%`;
                 successFillEl.style.width = `${(rate || 0) * 100}%`;
                 successSampleEl.textContent = `n=${gameState.success_sample || 0}`;
-                const first = gameState.worlds[0];
-                currentCommandEl.textContent = (first && first.subgoal) || "—";
             }
             function updateMilestones() {
                 for (const key in milestoneElements) {
