@@ -87,19 +87,26 @@ To set up and run this Django application locally:
     ```bash
     pip install -r requirements.txt
     ```
-4.  **Apply database migrations:**
+4.  **Configure environment variables:**
+    ```bash
+    cp .env.example .env
+    ```
+    `SECRET_KEY` is required; without it every page returns a server error. `ALLOWED_HOSTS` is an optional comma-separated list and defaults to localhost only. Both can instead be exported in your shell, but a value in `.env` takes precedence.
+5.  **Apply database migrations** (sessions are stored in the database, so starting a simulation fails without this):
     ```bash
     python manage.py migrate
     ```
-5.  **Collect static files:**
+6.  **Collect static files:**
     ```bash
     python manage.py collectstatic
     ```
-6.  **Start the Django development server:**
+7.  **Start the Django development server:**
     ```bash
     python manage.py runserver
     ```
-The application will typically be accessible at `http://127.0.0.1:8000/simulation`.
+The application will be accessible at `http://127.0.0.1:8000/simulation/`.
+
+To run the tests: `python manage.py test`.
 
 ### 5. Usage
 

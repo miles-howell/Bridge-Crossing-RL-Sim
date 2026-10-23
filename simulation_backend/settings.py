@@ -9,7 +9,9 @@ load_dotenv(os.path.join(BASE_DIR, '.env'), override=True)
 
 SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = True
-ALLOWED_HOSTS = [os.getenv('ALLOWED_HOSTS')]
+# Comma-separated. Left unset this is empty, which Django (with DEBUG on)
+# treats as localhost/127.0.0.1/[::1] only.
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', '').split(',') if h.strip()]
 
 
 
