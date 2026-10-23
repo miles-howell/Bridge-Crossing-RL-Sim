@@ -730,25 +730,66 @@
                     }
                 });
             }
+            // Agent focus, shared by the map and the Agents panel. Indices are
+            // world indices (A01 = 0). Display only: nothing here reaches the server.
+            let selectedAgent = null,
+                hoveredAgent = null;
+            const hiddenAgents = new Set();
+            // The agent the map currently emphasises: hover wins over selection.
+            function focusedAgent() {
+                return hoveredAgent ?? selectedAgent;
+            }
+            function isAgentVisible(i) {
+                return !hiddenAgents.has(i);
+            }
+
+            // Called once per simulation tick with the previous and new state, for
+            // anything that tracks history across ticks (trails, status effects).
+            // prevState is null right after a reset.
+            function onStateUpdate(prevState, newState) {}
+
+            // Layers, bottom to top: trail, ground marks (focus ring), sprites in
+            // scene order, status overlays.
             function drawAgents() {
                 if (!gameState || !gameState.worlds || !charSheet.complete || charSheet.naturalHeight === 0) return;
-                gameState.worlds.forEach((world, i) => {
-                    const agent = world.agent;
-                    const anim_frames = CHAR_SPRITE_MAP[agent.last_action];
-                    if (!anim_frames) return;
-                    const current_frame_index = Math.floor(agent.animation_frame / 4) % anim_frames.length;
-                    if (i > 0) {
-                        const sheet = agentSheets[(i - 1) % agentSheets.length];
-                        const { w, h, count } = AGENT_SHEET_FRAME;
-                        const scale = TILE_DEST_SIZE / TILE_SOURCE_SIZE;
-                        simCtx.drawImage(sheet, (current_frame_index % count) * w, AGENT_SHEET_ROWS[agent.last_action] * h, w, h,
-                            agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE + AGENT_SHEET_FOOT_OFFSET * scale, w * scale, h * scale);
-                        return;
-                    }
-                    const frame = anim_frames[current_frame_index];
-                    simCtx.drawImage(charSheet, frame.bottom.x * TILE_SOURCE_SIZE, frame.bottom.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, agent.ay * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
-                    simCtx.drawImage(charSheet, frame.top.x * TILE_SOURCE_SIZE, frame.top.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                drawAgentTrail();
+                drawAgentGroundMarks();
+                agentDrawOrder().forEach((i) => {
+                    if (!isAgentVisible(i)) return;
+                    simCtx.save();
+                    simCtx.globalAlpha = agentAlpha(i);
+                    drawAgentSprite(gameState.worlds[i], i);
+                    simCtx.restore();
                 });
+                drawAgentStatusOverlays();
+            }
+            // World indices of the agents in the order their sprites are painted.
+            function agentDrawOrder() {
+                return gameState.worlds.map((_, i) => i);
+            }
+            // Sprite opacity, e.g. to dim agents other than the focused one.
+            function agentAlpha(i) {
+                return 1;
+            }
+            function drawAgentTrail() {}
+            function drawAgentGroundMarks() {}
+            function drawAgentStatusOverlays() {}
+            function drawAgentSprite(world, i) {
+                const agent = world.agent;
+                const anim_frames = CHAR_SPRITE_MAP[agent.last_action];
+                if (!anim_frames) return;
+                const current_frame_index = Math.floor(agent.animation_frame / 4) % anim_frames.length;
+                if (i > 0) {
+                    const sheet = agentSheets[(i - 1) % agentSheets.length];
+                    const { w, h, count } = AGENT_SHEET_FRAME;
+                    const scale = TILE_DEST_SIZE / TILE_SOURCE_SIZE;
+                    simCtx.drawImage(sheet, (current_frame_index % count) * w, AGENT_SHEET_ROWS[agent.last_action] * h, w, h,
+                        agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE + AGENT_SHEET_FOOT_OFFSET * scale, w * scale, h * scale);
+                    return;
+                }
+                const frame = anim_frames[current_frame_index];
+                simCtx.drawImage(charSheet, frame.bottom.x * TILE_SOURCE_SIZE, frame.bottom.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, agent.ay * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                simCtx.drawImage(charSheet, frame.top.x * TILE_SOURCE_SIZE, frame.top.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, agent.ax * TILE_DEST_SIZE, (agent.ay - 1) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
             }
             function drawQValueVisualization() {
                 qCtx.fillStyle = theme.canvasBg;
@@ -1179,6 +1220,7 @@
 
                 if (response.ok) {
                     gameState = await response.json();
+                    onStateUpdate(null, gameState);
                     qValueData = managerQValueData = null;
                     lastEventId = -1;
                     eventStreamEl.replaceChildren();
@@ -1196,6 +1238,7 @@
                     simWorker.onmessage = function (e) {
                         const { type, message, gameState: newGameState, qValueData: newQValueData, managerQValueData: newManagerQValueData } = e.data;
                         if (type === "update") {
+                            onStateUpdate(gameState, newGameState);
                             gameState = newGameState;
                             stateDirty = true;
                         } else if (type === "all_q_values_update") {
