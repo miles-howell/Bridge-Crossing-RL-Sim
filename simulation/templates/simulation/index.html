@@ -325,7 +325,10 @@
             .agent-select { flex: 1; gap: 10px; min-width: 0; padding: 0 6px; text-align: left; }
             .agent-vis { justify-content: center; width: 28px; padding: 0; color: var(--muted); }
             .agent-vis:hover { color: var(--text); }
-            .agent-vis[aria-pressed="true"] .eye-off, .agent-vis[aria-pressed="false"] .eye-on { display: none; }
+            .agent-vis[aria-pressed="true"] .eye-off, .agent-vis[aria-pressed="false"] .eye-on, .agent-vis[aria-pressed="mixed"] .eye-off { display: none; }
+            .agent-vis[aria-pressed="mixed"] svg { opacity: 0.55; }
+            .agent-all[hidden] { display: none; }
+            .agent-all .label { padding: 0 6px; color: var(--muted); }
             .agent-row.hovered .agent-select { background: var(--surface-2); }
             .agent-row.selected .agent-select { background: rgba(var(--focus-rgb), 0.16); box-shadow: inset 2px 0 0 rgb(var(--focus-rgb)); }
             .agent-row.hidden .agent-select { opacity: 0.45; }
@@ -484,6 +487,10 @@
                         <h2>Agents</h2>
                         <span class="panel-meta">log · bridge · crossed</span>
                     </div>
+                    <div class="agent-row agent-all" hidden>
+                        <button type="button" class="agent-vis" id="agentAllVis" aria-label="Show all agents on map" title="Show or hide every agent on the map"></button>
+                        <span class="label">All agents</span>
+                    </div>
                     <div id="agentList"></div>
                 </section>
             </aside>
@@ -559,6 +566,7 @@
                 successFillEl = document.getElementById("successFill"),
                 successSampleEl = document.getElementById("successSample");
             const agentListEl = document.getElementById("agentList"),
+                agentAllVisEl = document.getElementById("agentAllVis"),
                 eventStreamEl = document.getElementById("eventStream"),
                 managerTableEl = document.getElementById("managerTable");
 
@@ -794,6 +802,15 @@
                     hiddenAgents.add(i);
                     if (selectedAgent === i) selectedAgent = null;
                 }
+                syncAgentRows();
+            }
+            function setAllAgentsVisible(visible) {
+                const n = agentListEl.children.length;
+                for (let i = 0; i < n; i++) {
+                    if (visible) hiddenAgents.delete(i);
+                    else hiddenAgents.add(i);
+                }
+                if (!visible) selectedAgent = null;
                 syncAgentRows();
             }
             // Drop focus state that points past the end of a smaller new run.
@@ -1346,7 +1363,17 @@
                     row.querySelector(".agent-select").setAttribute("aria-pressed", String(selectedAgent === i));
                     row.querySelector(".agent-vis").setAttribute("aria-pressed", String(visible));
                 });
+                // The "All agents" toggle is pressed when every agent shows,
+                // mixed when only some do.
+                const n = agentListEl.children.length,
+                    shown = n - hiddenAgents.size;
+                agentAllVisEl.parentElement.hidden = n === 0;
+                agentAllVisEl.setAttribute("aria-pressed", shown === n ? "true" : shown === 0 ? "false" : "mixed");
+                agentAllVisEl.setAttribute("aria-label", shown === n ? "Hide all agents on map" : "Show all agents on map");
             }
+            agentAllVisEl.innerHTML = EYE_ICON;
+            // Anything hidden means "show all"; only a fully visible list hides.
+            agentAllVisEl.addEventListener("click", () => setAllAgentsVisible(hiddenAgents.size > 0));
             agentListEl.addEventListener("click", (e) => {
                 const row = e.target.closest(".agent-row");
                 if (!row) return;
