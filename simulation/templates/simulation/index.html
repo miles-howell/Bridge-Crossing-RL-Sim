@@ -764,8 +764,20 @@
                 drawAgentStatusOverlays();
             }
             // World indices of the agents in the order their sprites are painted.
+            // Sprites are two tiles tall, so an agent's head overlaps the row above
+            // it: painting by row (ay ascending) puts nearer agents in front. On a
+            // shared tile the focused agent goes on top, then the lowest index, so
+            // A01 tops the spawn stack. Within a row, columns are ordered too: sprites
+            // are one tile wide, so that never changes the picture, but it keeps the
+            // comparator a total order. Positions snap to tiles, so the order only
+            // changes when a tick arrives or the focus moves.
             function agentDrawOrder() {
-                return gameState.worlds.map((_, i) => i);
+                const worlds = gameState.worlds,
+                    f = focusedAgent();
+                return worlds.map((_, i) => i).sort((i, j) => {
+                    const a = worlds[i].agent, b = worlds[j].agent;
+                    return a.ay - b.ay || a.ax - b.ax || (i === f) - (j === f) || j - i;
+                });
             }
             // Sprite opacity, e.g. to dim agents other than the focused one.
             function agentAlpha(i) {
