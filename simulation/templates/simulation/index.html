@@ -5,339 +5,442 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta name="csrf-token" content="{{ csrf_token }}" />
-        <title>Hierarchical RL Simulation</title>
-        <script src="https://cdn.tailwindcss.com"></script>
-        <style>
-            body {
-                font-family: "Inter", sans-serif;
-            }
-            canvas {
-                background-color: #2b2b2b;
-                border: 2px solid #1a1a1a;
-                border-radius: 0.5rem;
-                image-rendering: pixelated;
-                image-rendering: -moz-crisp-edges;
-                image-rendering: crisp-edges;
-                width: 100%;
-                height: auto;
-            }
-            .ui-box {
-                background: #4a5462;
-                color: #e0e0e0;
-                padding: 1rem;
-                border-radius: 0.5rem;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-                border: 1px solid #5a6472;
-            }
-            .control-group {
-                display: flex;
-                flex-direction: column;
-                gap: 0.5rem;
-                background: #3d4551;
-                padding: 0.75rem;
-                border-radius: 0.5rem;
-            }
-            .control-group label {
-                font-size: 0.875rem;
-                font-weight: bold;
-            }
-            .control-group input[type="range"] {
-                -webkit-appearance: none;
-                appearance: none;
-                width: 100%;
-                height: 8px;
-                background: #2b2b2b;
-                border-radius: 4px;
-                outline: none;
-            }
-            .control-group input[type="range"]::-webkit-slider-thumb {
-                -webkit-appearance: none;
-                appearance: none;
-                width: 20px;
-                height: 20px;
-                background: #6db46f;
-                cursor: pointer;
-                border-radius: 50%;
-            }
-            .control-group input[type="range"]::-moz-range-thumb {
-                width: 20px;
-                height: 20px;
-                background: #6db46f;
-                cursor: pointer;
-                border-radius: 50%;
-            }
-            .vis-toggle-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 0.5rem;
-            }
-            .toggle-label {
-                display: flex;
-                align-items: center;
-                cursor: pointer;
-                padding: 0.5rem;
-                background-color: #3d4551;
-                border-radius: 0.375rem;
-                transition: background-color 0.2s;
-            }
-            .toggle-label:hover {
-                background-color: #5a6472;
-            }
-            .toggle-label input {
-                display: none;
-            }
-            .toggle-color-box {
-                width: 1rem;
-                height: 1rem;
-                border-radius: 0.25rem;
-                margin-right: 0.75rem;
-                border: 2px solid transparent;
-                transition: border-color 0.2s;
-            }
-            .toggle-label input:checked + .toggle-color-box {
-                border-color: #fff;
-            }
-            #managerGraphCanvas {
-                background-color: #3d4551;
-                border: 2px solid #2b2b2b;
-            }
-        </style>
+        <title>Nigel's Quest — Hierarchical RL Simulation</title>
+        <script>
+            // Set the theme before first paint: a saved choice wins, else
+            // follow the OS. Storage can be unavailable (private mode), so
+            // every access is guarded.
+            (function () {
+                let saved = null;
+                try { saved = localStorage.getItem("theme"); } catch (e) {}
+                const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = saved || (prefersDark ? "dark" : "light");
+            })();
+        </script>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Roboto+Mono:wght@400;500;600&display=swap"
             rel="stylesheet"
         />
+        <style>
+            /* Dark: "Mission Control". */
+            :root,
+            :root[data-theme="dark"] {
+                --bg: #0e1116;
+                --surface: #151a21;
+                --surface-2: #1b2129;
+                --header-bg: #12161c;
+                --border: #262d38;
+                --rule: #1d232c;
+                --text: #e6eaf0;
+                --text-2: #c5ccd6;
+                --muted: #8b95a5;
+                --accent: #f5a524;
+                --btn-primary-bg: #f5a524;
+                --btn-primary-fg: #0e1116;
+                --pos: #4ade80;
+                --neg: #f87171;
+                --pos-rgb: 74, 222, 128;
+                --neg-rgb: 248, 113, 113;
+                --q-pos-rgb: 245, 165, 36;
+                --q-neg-rgb: 248, 113, 113;
+                --canvas-bg: #0e1116;
+                --pill-bg: #12261b;
+                --pill-border: #2c5a3e;
+                --pill-fg: #4ade80;
+                --pill-muted: #8b95a5;
+                --pill-track: #1e3a2a;
+                --spark: #38bdf8;
+                --font-sans: "Inter Tight", system-ui, sans-serif;
+                --font-mono: "JetBrains Mono", ui-monospace, monospace;
+                --head-font: var(--font-mono);
+                --head-size: 11px;
+                --head-spacing: 0.1em;
+                --head-transform: uppercase;
+                --radius: 10px;
+                color-scheme: dark;
+            }
+            /* Light: "Paper Terminal". */
+            :root[data-theme="light"] {
+                --bg: #f2f3f5;
+                --surface: #ffffff;
+                --surface-2: #f6f7f9;
+                --header-bg: #ffffff;
+                --border: #d6dae0;
+                --rule: #eef0f3;
+                --text: #111418;
+                --text-2: #2b313a;
+                --muted: #5a6270;
+                --accent: #1f4fd8;
+                --btn-primary-bg: #111418;
+                --btn-primary-fg: #ffffff;
+                --pos: #157f3b;
+                --neg: #c2410c;
+                --pos-rgb: 21, 127, 59;
+                --neg-rgb: 194, 65, 12;
+                --q-pos-rgb: 31, 79, 216;
+                --q-neg-rgb: 194, 65, 12;
+                --canvas-bg: #ffffff;
+                --pill-bg: #1f4fd8;
+                --pill-border: #1f4fd8;
+                --pill-fg: #ffffff;
+                --pill-muted: rgba(255, 255, 255, 0.85);
+                --pill-track: rgba(255, 255, 255, 0.3);
+                --spark: #1f4fd8;
+                --font-sans: "Inter", system-ui, sans-serif;
+                --font-mono: "Roboto Mono", ui-monospace, monospace;
+                --head-font: var(--font-sans);
+                --head-size: 12px;
+                --head-spacing: 0;
+                --head-transform: none;
+                --radius: 8px;
+                color-scheme: light;
+            }
+
+            * { box-sizing: border-box; }
+            body {
+                margin: 0;
+                background: var(--bg);
+                color: var(--text);
+                font-family: var(--font-sans);
+                font-size: 14px;
+            }
+            .mono { font-family: var(--font-mono); }
+            .muted { color: var(--muted); }
+
+            /* Header */
+            .topbar { background: var(--header-bg); border-bottom: 1px solid var(--border); }
+            .topbar-inner {
+                padding: 12px 20px;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px 24px;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .brand { display: flex; align-items: center; gap: 14px; }
+            .brand h1 { margin: 0; font-size: 17px; font-weight: 700; }
+            .brand h1 span { font-weight: 500; color: var(--muted); }
+            .chips { display: flex; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 12px; }
+            .chip {
+                padding: 6px 10px;
+                border: 1px solid var(--border);
+                border-radius: 6px;
+                background: var(--surface);
+                white-space: nowrap;
+            }
+            .chip .label { color: var(--muted); margin-right: 4px; }
+            /* Fixed-width numbers so changing values don't resize the chips
+               and reflow the header. */
+            .num { display: inline-block; text-align: right; font-variant-numeric: tabular-nums; }
+            #successRate { min-width: 6ch; }
+            #successSample { min-width: 5ch; }
+            #episodesCompleted { min-width: 7ch; }
+            #status { display: inline-block; min-width: 20ch; }
+            .success-pill {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 12px;
+                border: 1px solid var(--pill-border);
+                border-radius: 999px;
+                background: var(--pill-bg);
+                color: var(--pill-fg);
+                white-space: nowrap;
+            }
+            .success-pill .label, .success-pill .sample { color: var(--pill-muted); }
+            .success-pill strong { font-weight: 600; }
+            .success-track {
+                display: block;
+                width: 48px;
+                height: 4px;
+                border-radius: 2px;
+                background: var(--pill-track);
+                overflow: hidden;
+            }
+            .success-fill { display: block; width: 0; height: 100%; background: var(--pill-fg); }
+            .actions { display: flex; gap: 8px; }
+            button { font: inherit; cursor: pointer; }
+            .btn {
+                min-height: 44px;
+                padding: 0 16px;
+                border-radius: 8px;
+                border: 1px solid var(--border);
+                background: var(--surface);
+                color: var(--text);
+                font-weight: 600;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+            }
+            .btn-icon { min-width: 44px; padding: 0; }
+            .btn-primary { border: 0; background: var(--btn-primary-bg); color: var(--btn-primary-fg); }
+            .btn:focus-visible, .segmented label:focus-within, input[type="range"]:focus-visible {
+                outline: 2px solid var(--accent);
+                outline-offset: 2px;
+            }
+            [data-theme="dark"] .icon-sun, [data-theme="light"] .icon-moon { display: none; }
+
+            /* Layout */
+            .layout { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; align-items: flex-start; }
+            .col-params { flex: 1 1 240px; max-width: 100%; min-width: 0; }
+            .col-main { flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+            .col-side { flex: 1 1 280px; max-width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+            .row { display: flex; flex-wrap: wrap; gap: 12px; }
+            /* On narrow screens show the simulation before the sliders. */
+            @media (max-width: 900px) { .col-main { order: -1; } }
+            .row > .panel { flex: 1 1 380px; min-width: 0; }
+            .panel {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                padding: 14px;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            .panel-head {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .panel h2 {
+                margin: 0;
+                font-family: var(--head-font);
+                font-size: var(--head-size);
+                font-weight: 600;
+                letter-spacing: var(--head-spacing);
+                text-transform: var(--head-transform);
+                color: var(--muted);
+            }
+            .panel-meta { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+
+            canvas { display: block; width: 100%; height: auto; background: var(--canvas-bg); }
+            #simulationCanvas {
+                image-rendering: pixelated;
+                image-rendering: -moz-crisp-edges;
+                image-rendering: crisp-edges;
+            }
+
+            /* Hyperparameters */
+            .params { gap: 16px; }
+            .param { display: flex; flex-direction: column; gap: 6px; }
+            .param-row { display: flex; justify-content: space-between; gap: 8px; }
+            .param-row label { color: var(--text-2); }
+            .param-row span { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+            input[type="range"] { width: 100%; accent-color: var(--accent); }
+            .params-note { font-size: 12px; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 12px; }
+
+            /* Sub-goal selector */
+            .segmented {
+                display: flex;
+                gap: 2px;
+                padding: 2px;
+                border: 1px solid var(--border);
+                border-radius: 6px;
+            }
+            .segmented label {
+                display: flex;
+                align-items: center;
+                min-height: 32px;
+                padding: 0 9px;
+                border-radius: 4px;
+                font-family: var(--font-mono);
+                font-size: 11px;
+                color: var(--text-2);
+                cursor: pointer;
+            }
+            .segmented label { position: relative; }
+            .segmented input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+            .segmented label:has(input:checked) { background: var(--accent); color: var(--btn-primary-fg); }
+            [data-theme="light"] .segmented label:has(input:checked) { background: var(--text); color: var(--surface); }
+
+            /* Manager Q table */
+            .q-table {
+                display: grid;
+                grid-template-columns: 1.4fr repeat(4, minmax(0, 1fr));
+                gap: 2px;
+                font-family: var(--font-mono);
+                font-size: 12px;
+            }
+            .q-table span { padding: 9px 6px; border-radius: 3px; text-align: center; }
+            .q-table .th { color: var(--muted); padding: 6px; }
+            .q-table .state { text-align: left; color: var(--text-2); }
+            .q-table .best { font-weight: 700; }
+
+            /* Event stream */
+            .events {
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+                font-family: var(--font-mono);
+                font-size: 12px;
+                height: 196px;
+                overflow: auto;
+            }
+            .event { display: flex; gap: 12px; padding: 4px 6px; }
+            .event .who { color: var(--muted); }
+            .event .what { flex: 1; color: var(--text-2); }
+            .event .pos { color: var(--pos); }
+            .event .neg { color: var(--neg); }
+            .empty { color: var(--muted); font-size: 12px; padding: 4px 6px; }
+
+            /* Milestones */
+            .milestone { display: flex; align-items: center; gap: 10px; }
+            .milestone .name { flex: 1; color: var(--text-2); }
+            .milestone strong { font-family: var(--font-mono); font-weight: 500; min-width: 44px; text-align: right; }
+            .spark { display: flex; align-items: flex-end; gap: 2px; height: 22px; }
+            .spark i { display: block; width: 4px; min-height: 1px; background: var(--spark); opacity: 0.85; }
+
+            /* Agents */
+            .agent-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                font-family: var(--font-mono);
+                font-size: 12px;
+                padding: 4px 0;
+                border-bottom: 1px solid var(--rule);
+            }
+            .agent-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pos); }
+            .agent-row .dot.done { background: var(--muted); }
+            .agent-row .id { color: var(--muted); }
+            .agent-row .cmd { flex: 1; color: var(--text-2); }
+        </style>
     </head>
-    <body class="bg-slate-800 text-slate-200">
-        <div class="w-full min-h-screen flex flex-col items-center p-4">
-            <div class="w-full max-w-7xl mb-6 text-center">
-                <h1 class="text-4xl font-bold text-white mb-2">
-                    Nigel's Quest: A Hierarchical Learning Adventure
-                </h1>
-                <p class="text-slate-400 max-w-3xl mx-auto">
-                    This is an interactive Hierarchical Q-Learning simulation. A
-                    high-level "Manager" agent learns the overall strategy by
-                    giving commands to a low-level "Worker" agent, which learns
-                    how to execute those commands efficiently using Hindsight
-                    Experience Replay.
-                </p>
-            </div>
-
-            <h2
-                id="status"
-                class="text-xl font-bold text-center mb-4 text-white"
-            >
-                Status: Loading assets...
-            </h2>
-
-            <div
-                class="w-full max-w-7xl flex-grow flex flex-col lg:flex-row gap-6"
-            >
-                <div
-                    class="canvas-container flex flex-col gap-4 w-full lg:w-2/3"
-                >
-                    <canvas id="simulationCanvas"></canvas>
-                    <canvas id="qValueCanvas"></canvas>
-                    <div class="ui-box">
-                         <h3 class="font-bold mb-2 text-center">Manager Policy Graph</h3>
-                         <canvas id="managerGraphCanvas" height="350"></canvas>
-                    </div>
+    <body>
+        <header class="topbar">
+            <div class="topbar-inner">
+                <div class="brand">
+                    <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M3 19h22"></path><path d="M7 19v-5h14v5"></path><path d="M3 23c3-2 5-2 8 0s5 2 8 0 5-2 6-1"></path></svg>
+                    <h1>Nigel's Quest <span>/ hierarchical RL</span></h1>
                 </div>
-
-                <div
-                    id="ui-panel"
-                    class="w-full lg:w-1/3 flex-shrink-0 flex flex-col gap-4"
-                >
-                    <div id="score-board" class="ui-box">
-                        <h3 class="font-bold mb-2">Scoreboard</h3>
-                        <p class="flex justify-between">
-                            <span>Manager Steps:</span
-                            ><strong id="episodesCompleted">0</strong>
-                        </p>
-                    </div>
-                    <div id="milestones-board" class="ui-box">
-                        <h3 class="font-bold mb-2">Milestones</h3>
-                        <p class="flex justify-between">
-                            <span>Log Picked Up:</span
-                            ><strong id="ms-picked-up">0</strong>
-                        </p>
-                        <p class="flex justify-between">
-                            <span>Bridge Placed:</span
-                            ><strong id="ms-placed">0</strong>
-                        </p>
-                        <p class="flex justify-between">
-                            <span>Bridge Crossed:</span
-                            ><strong id="ms-crossed">0</strong>
-                        </p>
-                        <p class="flex justify-between">
-                            <span>Reached Home:</span
-                            ><strong id="ms-home">0</strong>
-                        </p>
-                    </div>
-                    <div id="vis-control-board" class="ui-box">
-                        <h3 class="font-bold mb-2">Worker Brain View</h3>
-                        <div id="viewStateToggles" class="vis-toggle-grid">
-                            <label class="toggle-label">
-                                <input
-                                    type="radio"
-                                    name="vis-toggle"
-                                    value="GOTO_LOG"
-                                    checked
-                                />
-                                <span
-                                    class="toggle-color-box"
-                                    style="background-color: #6ee7b7"
-                                ></span>
-                                Goal: Log
-                            </label>
-                            <label class="toggle-label">
-                                <input
-                                    type="radio"
-                                    name="vis-toggle"
-                                    value="GOTO_RIVER"
-                                />
-                                <span
-                                    class="toggle-color-box"
-                                    style="background-color: #60a5fa"
-                                ></span>
-                                Goal: River
-                            </label>
-                            <label class="toggle-label">
-                                <input
-                                    type="radio"
-                                    name="vis-toggle"
-                                    value="GOTO_FAR_BANK"
-                                />
-                                <span
-                                    class="toggle-color-box"
-                                    style="background-color: #f472b6"
-                                ></span>
-                                Goal: Cross Bridge
-                            </label>
-                            <label class="toggle-label">
-                                <input
-                                    type="radio"
-                                    name="vis-toggle"
-                                    value="GOTO_HOUSE"
-                                />
-                                <span
-                                    class="toggle-color-box"
-                                    style="background-color: #facc15"
-                                ></span>
-                                Goal: House
-                            </label>
-                        </div>
-                    </div>
-                    <div id="controls" class="grid grid-cols-1 gap-4">
-                        <div class="control-group">
-                            <label for="agentsSlider"
-                                >Agents (<span id="agentsValue">10</span
-                                >)</label
-                            >
-                            <input
-                                type="range"
-                                id="agentsSlider"
-                                min="1"
-                                max="10"
-                                step="1"
-                                value="10"
-                            />
-                        </div>
-                        <div class="control-group">
-                            <label for="dfSlider"
-                                >Discount Factor (<span id="dfValue">0.9</span
-                                >)</label
-                            >
-                            <input
-                                type="range"
-                                id="dfSlider"
-                                min="0.1"
-                                max="0.99"
-                                step="0.01"
-                                value="0.9"
-                            />
-                        </div>
-                        <div class="control-group">
-                            <label for="workerLrSlider"
-                                >Worker Learning Rate (<span id="workerLrValue">0.001</span
-                                >)</label
-                            >
-                            <input
-                                type="range"
-                                id="workerLrSlider"
-                                min="0.0001"
-                                max="0.05"
-                                step="0.0001"
-                                value="0.001"
-                            />
-                        </div>
-                        <div class="control-group">
-                            <label for="managerLrSlider"
-                                >Manager Learning Rate (<span id="managerLrValue">0.01</span
-                                >)</label
-                            >
-                            <input
-                                type="range"
-                                id="managerLrSlider"
-                                min="0.0001"
-                                max="0.1"
-                                step="0.0001"
-                                value="0.01"
-                            />
-                        </div>
-                        <div class="control-group">
-                            <label for="batchSlider"
-                                >Replay Batch Size (<span id="batchValue"
-                                    >32</span
-                                >)</label
-                            >
-                            <input
-                                type="range"
-                                id="batchSlider"
-                                min="4"
-                                max="128"
-                                step="4"
-                                value="32"
-                            />
-                        </div>
-                        <div class="control-group">
-                            <label for="costSlider"
-                                >Step Penalty (<span id="costValue">2</span
-                                >)</label
-                            >
-                            <input
-                                type="range"
-                                id="costSlider"
-                                min="1"
-                                max="25"
-                                step="1"
-                                value="2"
-                            />
-                        </div>
-                        <div class="control-group">
-                            <label for="speedSlider"
-                                >Sim Speed (<span id="speedValue">50</span
-                                >ms)</label
-                            >
-                            <input
-                                type="range"
-                                id="speedSlider"
-                                min="0"
-                                max="200"
-                                step="10"
-                                value="50"
-                            />
-                        </div>
-                    </div>
-                    <button
-                        id="resetButton"
-                        class="w-full py-3 px-6 text-base font-bold text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
-                    >
-                        Start / Reset Simulation
+                <div class="chips" aria-live="polite">
+                    <span class="chip"><span class="label">status</span><span id="status">loading assets…</span></span>
+                    <span class="success-pill" title="Share of recent finished episodes (reached home vs. drowned) that reached home">
+                        <span class="label">success</span>
+                        <strong class="num" id="successRate">—</strong>
+                        <span class="success-track" aria-hidden="true"><span class="success-fill" id="successFill"></span></span>
+                        <span class="sample num" id="successSample">n=0</span>
+                    </span>
+                    <span class="chip"><span class="label">mgr steps</span><span class="num" id="episodesCompleted">0</span></span>
+                </div>
+                <div class="actions">
+                    <button type="button" class="btn btn-icon" id="themeToggle" aria-label="Switch theme">
+                        <svg class="icon-sun" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="8" r="3"></circle><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M3 13l1.4-1.4M11.6 4.4L13 3"></path></svg>
+                        <svg class="icon-moon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13.5 9.5A5.5 5.5 0 1 1 6.5 2.5a4.5 4.5 0 0 0 7 7z"></path></svg>
                     </button>
+                    <button type="button" class="btn btn-icon" id="pauseButton" aria-label="Pause" disabled>
+                        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><path id="pauseIcon" d="M5 3v10M11 3v10"></path></svg>
+                    </button>
+                    <button type="button" class="btn btn-primary" id="resetButton">Start / reset</button>
                 </div>
             </div>
+        </header>
+
+        <div class="layout">
+            <aside class="col-params panel params">
+                <h2>Hyperparameters</h2>
+                <div class="param">
+                    <div class="param-row"><label for="agentsSlider">Agents</label><span id="agentsValue">10</span></div>
+                    <input type="range" id="agentsSlider" min="1" max="10" step="1" value="10" />
+                </div>
+                <div class="param">
+                    <div class="param-row"><label for="dfSlider">Discount γ</label><span id="dfValue">0.9</span></div>
+                    <input type="range" id="dfSlider" min="0.1" max="0.99" step="0.01" value="0.9" />
+                </div>
+                <div class="param">
+                    <div class="param-row"><label for="workerLrSlider">Worker learning rate</label><span id="workerLrValue">0.001</span></div>
+                    <input type="range" id="workerLrSlider" min="0.0001" max="0.05" step="0.0001" value="0.001" />
+                </div>
+                <div class="param">
+                    <div class="param-row"><label for="managerLrSlider">Manager learning rate</label><span id="managerLrValue">0.01</span></div>
+                    <input type="range" id="managerLrSlider" min="0.0001" max="0.1" step="0.0001" value="0.01" />
+                </div>
+                <div class="param">
+                    <div class="param-row"><label for="batchSlider">Replay batch size</label><span id="batchValue">32</span></div>
+                    <input type="range" id="batchSlider" min="4" max="128" step="4" value="32" />
+                </div>
+                <div class="param">
+                    <div class="param-row"><label for="costSlider">Step penalty</label><span id="costValue">2</span></div>
+                    <input type="range" id="costSlider" min="1" max="25" step="1" value="2" />
+                </div>
+                <div class="param">
+                    <div class="param-row"><label for="speedSlider">Tick (ms)</label><span id="speedValue">50</span></div>
+                    <input type="range" id="speedSlider" min="0" max="200" step="10" value="50" />
+                </div>
+                <p class="params-note">Changes apply on reset, except tick speed, which applies live.</p>
+            </aside>
+
+            <main class="col-main">
+                <div class="row">
+                    <section class="panel" id="worldPanel">
+                        <div class="panel-head">
+                            <h2>Environment</h2>
+                            <span class="panel-meta" id="gridMeta">20×12</span>
+                        </div>
+                        <canvas id="simulationCanvas"></canvas>
+                    </section>
+                    <section class="panel" id="qPanel">
+                        <div class="panel-head">
+                            <h2>Worker max Q(s, ·)</h2>
+                            <div class="segmented" id="viewStateToggles" role="radiogroup" aria-label="Sub-goal to visualize">
+                                <label><input type="radio" name="vis-toggle" value="GOTO_LOG" checked />LOG</label>
+                                <label><input type="radio" name="vis-toggle" value="GOTO_RIVER" />RIVER</label>
+                                <label><input type="radio" name="vis-toggle" value="GOTO_FAR_BANK" />FAR BANK</label>
+                                <label><input type="radio" name="vis-toggle" value="GOTO_HOUSE" />HOUSE</label>
+                            </div>
+                        </div>
+                        <canvas id="qValueCanvas"></canvas>
+                    </section>
+                </div>
+
+                <div class="row">
+                    <section class="panel">
+                        <h2>Manager Q(s, a)</h2>
+                        <div class="q-table" id="managerTable">
+                            <span class="th"></span>
+                            <span class="th">LOG</span>
+                            <span class="th">RIVER</span>
+                            <span class="th">FAR</span>
+                            <span class="th">HOUSE</span>
+                        </div>
+                        <p class="empty" id="managerTableEmpty">Waiting for the first Q-value update…</p>
+                    </section>
+                    <section class="panel">
+                        <h2>Event stream</h2>
+                        <div class="events" id="eventStream">
+                            <p class="empty" id="eventsEmpty">No sub-goals concluded yet.</p>
+                        </div>
+                    </section>
+                </div>
+
+                <section class="panel" id="managerPanel">
+                    <h2>Manager policy graph</h2>
+                    <canvas id="managerGraphCanvas" height="350"></canvas>
+                </section>
+            </main>
+
+            <aside class="col-side">
+                <section class="panel">
+                    <h2>Milestones</h2>
+                    <div class="milestone"><span class="name">Log picked up</span><div class="spark" data-spark="picked_up" aria-hidden="true"></div><strong id="ms-picked-up">0</strong></div>
+                    <div class="milestone"><span class="name">Bridge placed</span><div class="spark" data-spark="placed" aria-hidden="true"></div><strong id="ms-placed">0</strong></div>
+                    <div class="milestone"><span class="name">Bridge crossed</span><div class="spark" data-spark="crossed" aria-hidden="true"></div><strong id="ms-crossed">0</strong></div>
+                    <div class="milestone"><span class="name">Reached home</span><div class="spark" data-spark="home" aria-hidden="true"></div><strong id="ms-home">0</strong></div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head">
+                        <h2>Agents</h2>
+                        <span class="panel-meta">log · bridge · crossed</span>
+                    </div>
+                    <div id="agentList"></div>
+                </section>
+            </aside>
         </div>
 
         <script>
@@ -356,6 +459,8 @@
                 .getAttribute("content");
             const statusEl = document.getElementById("status");
             const resetButton = document.getElementById("resetButton");
+            const pauseButton = document.getElementById("pauseButton");
+            const themeToggle = document.getElementById("themeToggle");
             const agentsSlider = document.getElementById("agentsSlider"),
                 workerLrSlider = document.getElementById("workerLrSlider"),
                 managerLrSlider = document.getElementById("managerLrSlider"),
@@ -378,14 +483,25 @@
                 crossed: document.getElementById("ms-crossed"),
                 home: document.getElementById("ms-home"),
             };
-            const viewStateToggles =
-                document.getElementById("viewStateToggles");
+            const successRateEl = document.getElementById("successRate"),
+                successFillEl = document.getElementById("successFill"),
+                successSampleEl = document.getElementById("successSample");
+            const agentListEl = document.getElementById("agentList"),
+                eventStreamEl = document.getElementById("eventStream"),
+                managerTableEl = document.getElementById("managerTable");
 
             let gameState = null,
                 renderLoopRunning = false,
                 simWorker = null,
+                workerStartData = null,
+                paused = false,
                 qValueData = null,
                 managerQValueData = null;
+            // Set when new data arrives so the DOM panels (unlike the
+            // canvases) are only rebuilt when something actually changed.
+            let stateDirty = false,
+                managerDirty = false,
+                lastEventId = -1;
             let GRID_COLS = 20,
                 GRID_ROWS = 12,
                 TILE_DEST_SIZE = 40;
@@ -394,14 +510,46 @@
             let loadedAssets = 0;
             const totalAssets = 2;
 
+            // Canvas colors come from the active theme's CSS variables.
+            let theme = {};
+            function readTheme() {
+                const css = getComputedStyle(document.documentElement);
+                const v = (name) => css.getPropertyValue(name).trim();
+                theme = {
+                    canvasBg: v("--canvas-bg"),
+                    nodeFill: v("--surface-2"),
+                    text: v("--text"),
+                    posRgb: v("--pos-rgb"),
+                    negRgb: v("--neg-rgb"),
+                    qPosRgb: v("--q-pos-rgb"),
+                    qNegRgb: v("--q-neg-rgb"),
+                    font: v("--font-sans"),
+                };
+            }
+            function setTheme(name, persist) {
+                document.documentElement.dataset.theme = name;
+                if (persist) {
+                    try { localStorage.setItem("theme", name); } catch (e) {}
+                }
+                themeToggle.setAttribute("aria-label", name === "dark" ? "Switch to light theme" : "Switch to dark theme");
+                readTheme();
+            }
+            themeToggle.addEventListener("click", () =>
+                setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true));
+            window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+                let saved = null;
+                try { saved = localStorage.getItem("theme"); } catch (err) {}
+                if (!saved) setTheme(e.matches ? "dark" : "light", false);
+            });
+            setTheme(document.documentElement.dataset.theme, false);
+
             function assetLoaded() {
                 if (++loadedAssets === totalAssets) startOrResetSimulation();
             }
             charSheet.onload = tileSheet.onload = assetLoaded;
             charSheet.onerror = () => {
                 console.error("Asset failed to load.");
-                statusEl.textContent =
-                    "Error: Could not load simulation assets.";
+                statusEl.textContent = "error: could not load assets";
             };
             charSheet.src = "{% static 'images/character.png' %}";
             tileSheet.src = "{% static 'images/Overworld.png' %}";
@@ -452,13 +600,6 @@
                 ],
             };
             let activeRipples = [];
-            const STATE_COLORS = {
-                GOTO_LOG: "99, 230, 157",
-                GOTO_RIVER: "96, 165, 250",
-                GOTO_FAR_BANK: "244, 114, 182",
-                GOTO_HOUSE: "250, 204, 21",
-                negative: "239, 68, 68",
-            };
 
             function drawScene() {
                 if (gameState) {
@@ -538,13 +679,12 @@
                 });
             }
             function drawQValueVisualization() {
+                qCtx.fillStyle = theme.canvasBg;
+                qCtx.fillRect(0, 0, qCanvas.width, qCanvas.height);
                 if (!qValueData || !qValueData.q_maps) return;
                 const { q_maps, rows, cols } = qValueData;
                 const activeState = document.querySelector('input[name="vis-toggle"]:checked')?.value;
-                if (!activeState) {
-                    qCtx.clearRect(0, 0, qCanvas.width, qCanvas.height);
-                    return;
-                }
+                if (!activeState) return;
                 const currentMapData = q_maps[activeState];
                 if (!currentMapData) return;
                 // Normalize against this panel's own values, not all 4 goals
@@ -555,43 +695,48 @@
                 const localQs = currentMapData.q_map.flat();
                 const maxQ = Math.max(...localQs.filter((q) => q > -1000 && q < 1000), 0);
                 const minQ = Math.min(...localQs.filter((q) => q > -1000 && q < 1000), 0);
-                qCtx.clearRect(0, 0, qCanvas.width, qCanvas.height);
                 for (let r = 0; r < rows; r++) {
                     for (let c = 0; c < cols; c++) {
                         const q = currentMapData.q_map[r][c];
                         let color;
                         if (q > 0) {
                             const normQ = maxQ > 0 ? q / maxQ : 0;
-                            color = `rgba(${STATE_COLORS[activeState]}, ${normQ * 0.8})`;
+                            color = `rgba(${theme.qPosRgb}, ${normQ * 0.85})`;
                         } else if (q < 0) {
                             const normQ = minQ < 0 ? q / minQ : 0;
-                            color = `rgba(${STATE_COLORS.negative}, ${normQ * 0.7})`;
+                            color = `rgba(${theme.qNegRgb}, ${normQ * 0.7})`;
                         } else { continue; }
                         qCtx.fillStyle = color;
                         qCtx.fillRect(c * TILE_DEST_SIZE, r * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     }
                 }
             }
-            
-            // --- MODIFIED: Updated drawManagerGraph function with new layout ---
+
+            // stateKey is (has_bridge_piece, bridge_placed, has_crossed,
+            // last_subgoal_failed) -- the manager gained that 4th
+            // dimension (retry-memory) after this graph was built. Each
+            // node shows the "last attempt succeeded" (0) variant, since
+            // that's the happy-path reading these node labels describe;
+            // the "just failed" variant isn't represented here.
+            const MANAGER_STATES = [
+                { key: "0,0,0,0", label: "Start" },
+                { key: "1,0,0,0", label: "Has log" },
+                { key: "0,1,0,0", label: "Bridge placed" },
+                { key: "0,1,1,0", label: "Crossed" },
+            ];
+            const MANAGER_ACTIONS = ["GOTO_LOG", "GOTO_RIVER", "GOTO_FAR_BANK", "GOTO_HOUSE"];
+
             function drawManagerGraph() {
                 managerCtx.clearRect(0, 0, managerCanvas.width, managerCanvas.height);
                 if (!managerQValueData || !managerQValueData.manager_q_values) return;
 
                 const managerQValues = managerQValueData.manager_q_values;
                 const allQValues = Object.values(managerQValues).flatMap(actions => Object.values(actions));
-                const maxAbsQ = Math.max(...allQValues.map(q => Math.abs(q)), 1); 
+                const maxAbsQ = Math.max(...allQValues.map(q => Math.abs(q)), 1);
                 const nodeRadius = 28;
 
-                // New 2D layout based on user sketch
                 const w = managerCanvas.width;
                 const h = managerCanvas.height;
-                // stateKey is (has_bridge_piece, bridge_placed, has_crossed,
-                // last_subgoal_failed) -- the manager gained that 4th
-                // dimension (retry-memory) after this graph was built. Each
-                // node shows the "last attempt succeeded" (0) variant, since
-                // that's the happy-path reading these node labels describe;
-                // the "just failed" variant isn't represented here.
                 const nodePositions = {
                     'START':         { x: w * 0.20, y: h * 0.5,  label: 'Start', stateKey: '0,0,0,0'},
                     'HAS_LOG':       { x: w * 0.20, y: h * 0.2,  label: 'Has Log', stateKey: '1,0,0,0'},
@@ -599,7 +744,7 @@
                     'CROSSED':       { x: w * 0.80, y: h * 0.5,  label: 'Crossed', stateKey: '0,1,1,0'},
                     'HOME':          { x: w * 0.80, y: h * 0.2,  label: 'Home', stateKey: null}
                 };
-                
+
                 const actionToNextNode = {
                     'GOTO_LOG': 'HAS_LOG',
                     'GOTO_RIVER': 'BRIDGE_PLACED',
@@ -617,9 +762,10 @@
                         const endNodeKey = actionToNextNode[action];
                         if (!endNodeKey) return;
                         const endNode = nodePositions[endNodeKey];
-                        
+
                         const normQ = qValue / maxAbsQ;
-                        const color = qValue > 0 ? `rgba(110, 231, 183, ${Math.min(1, Math.abs(normQ) * 1.5)})` : `rgba(248, 113, 113, ${Math.min(1, Math.abs(normQ) * 1.5)})`;
+                        const alpha = Math.min(1, Math.abs(normQ) * 1.5);
+                        const color = `rgba(${qValue > 0 ? theme.posRgb : theme.negRgb}, ${alpha})`;
                         const lineWidth = Math.max(1.5, Math.abs(normQ) * 12);
 
                         drawArrow(managerCtx, startNode.x, startNode.y, endNode.x, endNode.y, color, lineWidth, qValue.toFixed(2), nodeRadius, w/2, h/2);
@@ -627,31 +773,31 @@
                 });
 
                 // Draw nodes on top of arrows
-                managerCtx.font = "bold 12px Inter";
+                managerCtx.font = `bold 12px ${theme.font}`;
                 managerCtx.textAlign = "center";
                 managerCtx.textBaseline = "middle";
                 Object.values(nodePositions).forEach(node => {
                     managerCtx.beginPath();
                     managerCtx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
-                    managerCtx.fillStyle = '#2b2b2b';
+                    managerCtx.fillStyle = theme.nodeFill;
                     managerCtx.fill();
-                    managerCtx.strokeStyle = '#e0e0e0';
+                    managerCtx.strokeStyle = theme.text;
                     managerCtx.lineWidth = 2;
                     managerCtx.stroke();
-                    managerCtx.fillStyle = '#e0e0e0';
+                    managerCtx.fillStyle = theme.text;
                     managerCtx.fillText(node.label, node.x, node.y);
                 });
             }
 
-            // --- MODIFIED: Updated drawArrow function for new layout ---
             function drawArrow(ctx, fromx, fromy, tox, toy, color, lineWidth, text, nodeRadius = 20, canvasCenterX, canvasCenterY) {
                 ctx.save();
-                
+                const labelFont = `bold 11px ${theme.font}`;
+
                 if (fromx === tox && fromy === toy) { // Handle self-loops
                     const loopRadius = nodeRadius * 0.7;
                     // Angle from canvas center to node, to position loop outwards
                     const angleToCenter = Math.atan2(fromy - canvasCenterY, fromx - canvasCenterX);
-                    
+
                     const loopCenterX = fromx + (nodeRadius + loopRadius) * Math.cos(angleToCenter);
                     const loopCenterY = fromy + (nodeRadius + loopRadius) * Math.sin(angleToCenter);
 
@@ -660,7 +806,7 @@
                     ctx.strokeStyle = color;
                     ctx.lineWidth = lineWidth;
                     ctx.stroke();
-                    
+
                     // Arrowhead for self-loop
                     const arrowTipAngle = angleToCenter - Math.PI * 0.9;
                     const arrowX = loopCenterX + loopRadius * Math.cos(arrowTipAngle);
@@ -676,7 +822,7 @@
 
                     // Text for self-loop
                     ctx.fillStyle = color;
-                    ctx.font = "bold 11px Inter";
+                    ctx.font = labelFont;
                     ctx.textAlign = "center";
                     ctx.fillText(text, loopCenterX + (loopRadius + 8) * Math.cos(angleToCenter), loopCenterY + (loopRadius + 8) * Math.sin(angleToCenter));
 
@@ -684,7 +830,7 @@
                     const dx = tox - fromx;
                     const dy = toy - fromy;
                     const angle = Math.atan2(dy, dx);
-                    
+
                     const startX = fromx + nodeRadius * Math.cos(angle);
                     const startY = fromy + nodeRadius * Math.sin(angle);
                     const endX = tox - nodeRadius * Math.cos(angle);
@@ -713,24 +859,117 @@
                     ctx.fill();
 
                     ctx.fillStyle = color;
-                    ctx.font = "bold 11px Inter";
+                    ctx.font = labelFont;
                     ctx.textAlign = "center";
                     ctx.fillText(text, controlX, controlY - 10);
                 }
                 ctx.restore();
             }
 
-            function updateScoreboard() {
-                if (!gameState) return;
+            function el(tag, className, text) {
+                const node = document.createElement(tag);
+                if (className) node.className = className;
+                if (text !== undefined) node.textContent = text;
+                return node;
+            }
+
+            function updateHeader() {
                 episodesCompletedEl.textContent = gameState.episodes_completed;
+                const rate = gameState.success_rate;
+                successRateEl.textContent = rate === null || rate === undefined ? "—" : `${(rate * 100).toFixed(1)}%`;
+                successFillEl.style.width = `${(rate || 0) * 100}%`;
+                successSampleEl.textContent = `n=${gameState.success_sample || 0}`;
             }
             function updateMilestones() {
-                if (!gameState) return;
                 for (const key in milestoneElements) {
                     if (gameState.milestones && gameState.milestones[key] !== undefined)
                         milestoneElements[key].textContent = gameState.milestones[key];
                 }
             }
+            function updateAgents() {
+                const rows = gameState.worlds.map((world, i) => {
+                    const row = el("div", "agent-row");
+                    row.appendChild(el("span", world.in_progress ? "dot" : "dot done"));
+                    row.appendChild(el("span", "id", `A${String(i + 1).padStart(2, "0")}`));
+                    row.appendChild(el("span", "cmd", world.subgoal || "choosing…"));
+                    row.appendChild(el("span", "id", (world.manager_state || []).join("")));
+                    return row;
+                });
+                agentListEl.replaceChildren(...rows);
+            }
+            const MAX_EVENT_ROWS = 50;
+            function updateEvents() {
+                const fresh = (gameState.events || []).filter((e) => e.id > lastEventId);
+                if (!fresh.length) return;
+                document.getElementById("eventsEmpty")?.remove();
+                fresh.forEach((e) => {
+                    const row = el("div", "event");
+                    row.appendChild(el("span", "who", `A${String(e.agent + 1).padStart(2, "0")}`));
+                    row.appendChild(el("span", "what", `${e.subgoal} → ${e.outcome}`));
+                    row.appendChild(el("span", e.reward > 0 ? "pos" : "neg", e.reward > 0 ? `+${e.reward}` : `−${Math.abs(e.reward)}`));
+                    eventStreamEl.prepend(row);
+                    lastEventId = e.id;
+                });
+                while (eventStreamEl.children.length > MAX_EVENT_ROWS) eventStreamEl.lastElementChild.remove();
+            }
+            function updateManagerTable() {
+                const q = managerQValueData && managerQValueData.manager_q_values;
+                if (!q) return;
+                document.getElementById("managerTableEmpty")?.remove();
+                const values = MANAGER_STATES.flatMap((s) => MANAGER_ACTIONS.map((a) => (q[s.key] || {})[a] ?? 0));
+                const lo = Math.min(...values), hi = Math.max(...values);
+                const cells = [];
+                MANAGER_STATES.forEach((s) => {
+                    const row = q[s.key] || {};
+                    const best = Math.max(...MANAGER_ACTIONS.map((a) => row[a] ?? -Infinity));
+                    cells.push(el("span", "state", s.label));
+                    MANAGER_ACTIONS.forEach((a) => {
+                        const v = row[a] ?? 0;
+                        const t = hi > lo ? (v - lo) / (hi - lo) : 0;
+                        const cell = el("span", v === best ? "best" : "", v.toFixed(1));
+                        cell.style.background = `color-mix(in srgb, var(--accent) ${Math.round(t * 50)}%, var(--surface-2))`;
+                        cells.push(cell);
+                    });
+                });
+                // Keep the five header cells, replace the body.
+                const header = Array.from(managerTableEl.children).slice(0, 5);
+                managerTableEl.replaceChildren(...header, ...cells);
+            }
+
+            // Milestone sparklines: how many of each milestone happened in
+            // each of the last SPARK_BUCKETS sampling intervals.
+            const SPARK_BUCKETS = 12, SPARK_INTERVAL_MS = 2000;
+            let sparkHistory = {}, lastSparkTotals = null;
+            function resetSparks() {
+                sparkHistory = {};
+                Object.keys(milestoneElements).forEach((k) => (sparkHistory[k] = Array(SPARK_BUCKETS).fill(0)));
+                lastSparkTotals = null;
+                renderSparks();
+            }
+            function sampleSparks() {
+                if (!gameState || !gameState.milestones || paused) return;
+                const totals = gameState.milestones;
+                if (lastSparkTotals) {
+                    for (const k in sparkHistory) {
+                        sparkHistory[k].push(Math.max(0, (totals[k] || 0) - (lastSparkTotals[k] || 0)));
+                        sparkHistory[k].shift();
+                    }
+                }
+                lastSparkTotals = { ...totals };
+                renderSparks();
+            }
+            function renderSparks() {
+                document.querySelectorAll("[data-spark]").forEach((node) => {
+                    const series = sparkHistory[node.dataset.spark] || [];
+                    const max = Math.max(1, ...series);
+                    node.replaceChildren(...series.map((v) => {
+                        const bar = el("i");
+                        bar.style.height = `${Math.round((v / max) * 22)}px`;
+                        return bar;
+                    }));
+                });
+            }
+            setInterval(sampleSparks, SPARK_INTERVAL_MS);
 
             function renderLoop() {
                 if (!renderLoopRunning) return;
@@ -738,28 +977,66 @@
                     drawScene();
                     drawQValueVisualization();
                     drawManagerGraph();
-                    updateScoreboard();
-                    updateMilestones();
+                    if (stateDirty) {
+                        updateHeader();
+                        updateMilestones();
+                        updateAgents();
+                        updateEvents();
+                        stateDirty = false;
+                    }
+                    if (managerDirty) {
+                        updateManagerTable();
+                        managerDirty = false;
+                    }
                 }
                 requestAnimationFrame(renderLoop);
             }
             function handleResize() {
-                const container = document.querySelector(".canvas-container");
-                if (!container || container.clientWidth === 0) return;
-                TILE_DEST_SIZE = Math.floor(container.clientWidth / GRID_COLS);
+                const worldPanel = document.getElementById("worldPanel"),
+                    qPanel = document.getElementById("qPanel"),
+                    managerPanel = document.getElementById("managerPanel");
+                // Both grids share TILE_DEST_SIZE, so size them to the narrower panel.
+                const inner = (node) => node.clientWidth - 28;
+                const width = Math.min(inner(worldPanel), inner(qPanel));
+                if (width <= 0) return;
+                TILE_DEST_SIZE = Math.max(4, Math.floor(width / GRID_COLS));
                 const newWidth = TILE_DEST_SIZE * GRID_COLS, newHeight = TILE_DEST_SIZE * GRID_ROWS;
                 simCanvas.width = qCanvas.width = newWidth;
                 simCanvas.height = qCanvas.height = newHeight;
-                managerCanvas.width = newWidth; 
+                managerCanvas.width = Math.max(320, inner(managerPanel));
                 simCanvas.background = null;
+                document.getElementById("gridMeta").textContent = `${GRID_COLS}×${GRID_ROWS}`;
             }
+
+            function setPaused(value) {
+                paused = value;
+                pauseButton.setAttribute("aria-label", paused ? "Resume" : "Pause");
+                document.getElementById("pauseIcon").setAttribute("d", paused ? "M5 3l8 5-8 5z" : "M5 3v10M11 3v10");
+            }
+            pauseButton.addEventListener("click", () => {
+                if (!simWorker || !workerStartData) return;
+                if (paused) {
+                    simWorker.postMessage({ command: "start", data: { ...workerStartData, speed: parseInt(speedSlider.value) || 50 } });
+                    statusEl.textContent = `${gameState.worlds.length} agent(s) learning`;
+                } else {
+                    simWorker.postMessage({ command: "stop" });
+                    statusEl.textContent = "paused";
+                }
+                setPaused(!paused);
+            });
 
             async function startOrResetSimulation() {
                 handleResize();
-                statusEl.textContent = "Status: Resetting...";
-                if (simWorker) simWorker.postMessage({ command: "stop" });
+                statusEl.textContent = "resetting…";
+                if (simWorker) {
+                    simWorker.postMessage({ command: "stop" });
+                    simWorker.terminate();
+                    simWorker = null;
+                }
                 renderLoopRunning = false;
-                
+                pauseButton.disabled = true;
+                setPaused(false);
+
                 const response = await fetch(API_STATE_URL, {
                     method: "POST",
                     headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
@@ -776,41 +1053,50 @@
 
                 if (response.ok) {
                     gameState = await response.json();
-                    statusEl.textContent = `Status: ${gameState.worlds.length} agent(s) learning...`;
-                    
+                    qValueData = managerQValueData = null;
+                    lastEventId = -1;
+                    eventStreamEl.replaceChildren();
+                    resetSparks();
+                    stateDirty = true;
+                    statusEl.textContent = `${gameState.worlds.length} agent(s) learning`;
+
                     if (!renderLoopRunning) {
                         renderLoopRunning = true;
                         renderLoop();
                     }
 
                     simWorker = new Worker("{% static 'js/simulation_worker.js' %}");
-                    
+
                     simWorker.onmessage = function (e) {
                         const { type, message, gameState: newGameState, qValueData: newQValueData, managerQValueData: newManagerQValueData } = e.data;
                         if (type === "update") {
                             gameState = newGameState;
+                            stateDirty = true;
                         } else if (type === "all_q_values_update") {
                             qValueData = newQValueData;
                             managerQValueData = newManagerQValueData;
+                            managerDirty = true;
                         } else if (type === "error") {
-                            statusEl.textContent = `Error: ${message}`;
+                            statusEl.textContent = `error: ${message}`;
                             renderLoopRunning = false;
+                            pauseButton.disabled = true;
                             if (simWorker) simWorker.postMessage({command: 'stop'});
                         }
                     };
-                    
+
+                    workerStartData = {
+                        apiStateUrl: API_STATE_URL,
+                        qValueApiUrl: API_Q_VALUES_URL,
+                        managerQValueApiUrl: API_MANAGER_Q_VALUES_URL,
+                        csrfToken: csrfToken,
+                    };
                     simWorker.postMessage({
                         command: "start",
-                        data: {
-                            apiStateUrl: API_STATE_URL,
-                            qValueApiUrl: API_Q_VALUES_URL,
-                            managerQValueApiUrl: API_MANAGER_Q_VALUES_URL,
-                            csrfToken: csrfToken,
-                            speed: parseInt(speedSlider.value) || 50,
-                        },
+                        data: { ...workerStartData, speed: parseInt(speedSlider.value) || 50 },
                     });
+                    pauseButton.disabled = false;
                 } else {
-                    statusEl.textContent = "Error resetting simulation.";
+                    statusEl.textContent = "error resetting simulation";
                 }
             }
 
@@ -826,6 +1112,7 @@
             dfSlider.addEventListener("input", (e) => (dfValue.textContent = e.target.value));
             batchSlider.addEventListener("input", (e) => (batchValue.textContent = e.target.value));
             costSlider.addEventListener("input", (e) => (costValue.textContent = e.target.value));
+            resetSparks();
         </script>
     </body>
 </html>
