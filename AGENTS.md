@@ -43,7 +43,8 @@ There is no CI, linter, or formatter config. Match the style of the surrounding 
 | `simulation/export.py` | Builds the downloadable run report and weights dump, plus the Q-table helpers the views reuse. |
 | `simulation/templates/simulation/index.html` | The whole UI in one file (markup, CSS, canvas rendering, controls, export modal). Server URLs are injected with `{% url %}`. |
 | `static/js/simulation_worker.js` | Web Worker that drives the polling loop and Q-value refreshes. |
-| `static/images/` | Sprite sheets. |
+| `static/images/` | Sprite sheets. `character.png` is Nigel (agent A01); `characters/*.png` are agents A02–A10. |
+| `tools/sprites/` | Generator for the agent character sheets: `build_sheets.py` holds the shared body template, `characters/<name>.py` each character's palette and pixel grids. Needs Pillow (not in `requirements.txt`). Edit the `.py` and rebuild rather than editing the PNGs. |
 | `simulation_backend/` | Django project: `settings.py`, `urls.py`, wsgi/asgi. |
 | `simulation/tests.py` | Reward/termination tests (`SimpleTestCase`, hand-built worlds) and export tests. |
 
