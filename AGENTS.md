@@ -12,7 +12,7 @@ A Django app that trains and visualizes a two-level hierarchical RL agent ("Nige
 
 ## Run it
 
-Python 3.13, `pip install -r requirements.txt` (installs PyTorch, which is large), preferably in a venv.
+Python 3.13, `pip install -r requirements.txt` (installs the CPU-only PyTorch build via the extra index in `requirements.txt`, which skips the multi-GB CUDA packages), preferably in a venv.
 
 **The app will not work until two things are set up:**
 
