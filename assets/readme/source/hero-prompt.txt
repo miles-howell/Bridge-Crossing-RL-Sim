@@ -1,0 +1,20 @@
+PROMPT (paste into the image generator)
+
+16-bit pixel art illustration in the style of a top-down Zelda-like SNES adventure game, seen from a slightly elevated three-quarter top-down view. A small, friendly young adventurer named Nigel stands on a grassy riverbank, holding a single wooden log above his head with both hands, about to lay it across a narrow river as a bridge. Nigel: short messy chestnut-brown hair, light peach skin, a plain red short-sleeved shirt, dark blue trousers, small brown boots, simple dot eyes; chibi proportions, roughly two heads tall. The log is a straight, rough-barked brown log with visible ring ends, about three times as wide as Nigel. The river runs vertically through the scene: three tiles of clear blue water with small white ripple marks, bordered on each side by a one-tile strip of brown earthen bank. On the far bank, a small cosy cottage with a red pitched roof, cream walls and a dark wooden door. Bright, saturated lime-green grass with subtle tile texture, a few tufts and pebbles; no other characters, no trees blocking the view.
+
+Crisp hard-edged pixels on a visible 16x16 tile grid, limited palette, no anti-aliasing, no blur, no gradients, no painterly or 3D rendering. Even, soft daylight; cheerful, calm and readable.
+
+Composition: wide 5:3 landscape. River in the centre, Nigel and the log on the left bank in the lower-left third, the cottage on the right bank in the upper-right third, with a clear walkable gap between them so the route log -> river -> far bank -> house reads at a glance.
+
+Do NOT include: any text, letters, numbers, logos, watermarks, UI, health bars, speech bubbles, borders or frames.
+
+Output: 2000 x 1200 px or larger. If the tool supports it, a transparent background around the scene; otherwise a flat solid #FF00FF magenta background with no shadow cast onto it, so it can be keyed out cleanly.
+
+
+CONTEXT (for you, not the generator)
+
+- Where it goes: the right-hand side of the README hero (the 520 x 312 map area, 5:3), replacing the schematic grid map. The title, tagline and "manager -> GOTO_..." line stay as SVG text on the left, so the image must contain no text at all.
+- Nigel's look is taken from static/images/character.png (the app's real sprite): brown hair, red shirt, blue trousers. The map layout follows simulation/engine.py: a 20 x 12 grid, river 3 water tiles wide with a 1-tile bank on each side, log on the lower left, 2 x 3 house top right.
+- The app's art comes from ArMM1998's Zelda-like tileset on OpenGameArt, so the "SNES Zelda-like" style keeps a generated image consistent with what visitors see when they run the app.
+- If you want a variant, swap the action: "Nigel walking across the log bridge mid-river" or "Nigel at the cottage door, the log bridge behind him".
+- Hand me the resulting PNG and I'll key out the background if needed, compose it into the hero with the SVG title, and export hero.png, keeping the SVG layout and the transparent subject as editable sources.
