@@ -741,7 +741,9 @@
                         simCtx.drawImage(tileSheet, tile.x * TILE_SOURCE_SIZE, tile.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, (gameState.house_start_col + c) * TILE_DEST_SIZE, (gameState.house_start_row + r) * TILE_DEST_SIZE, TILE_DEST_SIZE, TILE_DEST_SIZE);
                     }
                 }
-                gameState.worlds.forEach((world) => {
+                // A hidden agent's log and bridge are hidden with it.
+                gameState.worlds.forEach((world, i) => {
+                    if (!isAgentVisible(i)) return;
                     if (world.bridge_piece) {
                         for (let i = 0; i < TILE_MAP.bridge_asset.length; i++) {
                             const tile = TILE_MAP.bridge_asset[i];
