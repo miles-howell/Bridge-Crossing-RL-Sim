@@ -3,8 +3,10 @@ from django.shortcuts import render
 from django.http import JsonResponse
 import json
 import uuid
+from datetime import datetime, timezone
 
 from .engine import SimulationEngine, ManagerAgent, WorkerAgent, GRID_ROWS, GRID_COLS
+from .export import build_run_report, build_weights_export, manager_q_table, worker_q_maps
 
 # --- SERVER-SIDE CACHE ---
 server_engines = {}
@@ -67,8 +69,10 @@ def api_state(request):
             return JsonResponse({'status': 'error', 'message': 'Simulation not initialized. Please reset.'}, status=400)
 
         engine = server_engines[engine_id]
-        engine.update()
-        return JsonResponse(engine.get_state())
+        with engine.lock:
+            engine.update()
+            state = engine.get_state()
+        return JsonResponse(state)
 
     elif request.method == 'POST':
         data = json.loads(request.body)
@@ -92,28 +96,8 @@ def api_q_values(request):
         return JsonResponse({'status': 'error', 'message': 'Brain not initialized.'}, status=400)
 
     engine = server_engines[engine_id]
-    worker = engine.worker
-
-    goals_to_visualize = engine.worlds[0].subgoal_locations
-
-    states_to_visualize = {
-        'GOTO_LOG':      {'has_bridge': False, 'bridge_placed': False, 'has_crossed': False},
-        'GOTO_RIVER':    {'has_bridge': True,  'bridge_placed': False, 'has_crossed': False},
-        'GOTO_FAR_BANK': {'has_bridge': False, 'bridge_placed': True,  'has_crossed': False},
-        'GOTO_HOUSE':    {'has_bridge': False, 'bridge_placed': True,  'has_crossed': True},
-    }
-
-    all_q_maps = {}
-
-    for vis_name, goal_coord in goals_to_visualize.items():
-        state_conditions = states_to_visualize.get(vis_name, {})
-        flags = (
-            1 if state_conditions.get('has_bridge') else 0,
-            1 if state_conditions.get('bridge_placed') else 0,
-            1 if state_conditions.get('has_crossed') else 0,
-        )
-        q_map = worker.get_max_q_grid(goal_coord, GRID_ROWS, GRID_COLS, flags)
-        all_q_maps[vis_name] = {'q_map': q_map}
+    with engine.lock:
+        all_q_maps = worker_q_maps(engine.worker, engine.worlds[0].subgoal_locations)
 
     return JsonResponse({ 'q_maps': all_q_maps, 'rows': GRID_ROWS, 'cols': GRID_COLS })
 
@@ -128,13 +112,48 @@ def api_manager_q_values(request):
         return JsonResponse({'status': 'error', 'message': 'Brain not initialized.'}, status=400)
 
     engine = server_engines[engine_id]
-    manager = engine.manager
-
-    states = [(a, b, c, d) for a in (0, 1) for b in (0, 1) for c in (0, 1) for d in (0, 1)]
-    q_rows = manager.get_all_q_values(states)
-    serialized = {
-        ",".join(map(str, state)): dict(zip(manager.actions, q_row))
-        for state, q_row in zip(states, q_rows)
-    }
+    with engine.lock:
+        serialized = manager_q_table(engine.manager)
 
     return JsonResponse({'manager_q_values': serialized})
+
+
+def _export_response(payload, prefix):
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    response = JsonResponse(payload)
+    response['Content-Disposition'] = f'attachment; filename="{prefix}-{stamp}.json"'
+    return response
+
+
+def _engine_for_export(request):
+    if request.method != 'GET':
+        return None, JsonResponse({'status': 'error', 'message': 'Only GET method is allowed.'}, status=405)
+    engine_id = request.session.get('engine_id')
+    if not engine_id or engine_id not in server_engines:
+        return None, JsonResponse({'status': 'error', 'message': 'Simulation not initialized. Please reset.'}, status=400)
+    return server_engines[engine_id], None
+
+
+def api_export(request):
+    """ Downloads a full, agent-readable report of the current run. """
+    engine, error = _engine_for_export(request)
+    if error:
+        return error
+    try:
+        tick_ms = int(request.GET['tick_ms'])
+    except (KeyError, ValueError):
+        tick_ms = None
+    # Holding the lock pauses training for the moment the snapshot takes.
+    with engine.lock:
+        report = build_run_report(engine, tick_ms=tick_ms)
+    return _export_response(report, 'nigel-run')
+
+
+def api_export_weights(request):
+    """ Downloads the raw weights of the manager and worker networks. """
+    engine, error = _engine_for_export(request)
+    if error:
+        return error
+    with engine.lock:
+        weights = build_weights_export(engine)
+    return _export_response(weights, 'nigel-weights')

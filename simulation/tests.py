@@ -1,5 +1,10 @@
-from django.test import SimpleTestCase
+import json
+from unittest import mock
 
+from django.test import SimpleTestCase, TestCase
+from django.urls import reverse
+
+from . import engine as engine_module
 from .engine import (
     AgentState, DROWNING_PENALTY, ManagerAgent, SimulationEngine, WorkerAgent,
     WORKER_SUBGOAL_BONUS,
@@ -164,3 +169,68 @@ class EngineRewardTests(SimpleTestCase):
         state = self.engine.get_state()
         self.assertEqual(state['success_rate'], 0.5)
         self.assertEqual(state['success_sample'], 2)
+
+
+class ExportTests(TestCase):
+    REPORT_SECTIONS = {
+        'schema_version', 'how_to_read', 'metadata', 'hyperparameters', 'headline',
+        'timeseries', 'manager', 'worker', 'events', 'agents',
+    }
+
+    def _reset(self):
+        response = self.client.post(
+            reverse('api_state'),
+            data=json.dumps({'command': 'reset', 'numAgents': 2, 'batchSize': 8}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_export_requires_a_running_simulation(self):
+        self.assertEqual(self.client.get(reverse('api_export')).status_code, 400)
+        self.assertEqual(self.client.get(reverse('api_export_weights')).status_code, 400)
+
+    def test_report_has_every_section(self):
+        self._reset()
+        for _ in range(5):
+            self.client.get(reverse('api_state'))
+        response = self.client.get(reverse('api_export'), {'tick_ms': 40})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('nigel-run-', response['Content-Disposition'])
+
+        report = response.json()
+        self.assertEqual(set(report), self.REPORT_SECTIONS)
+        self.assertEqual(set(report['how_to_read']) - {'overview', 'canvases'}, self.REPORT_SECTIONS - {'schema_version', 'how_to_read'})
+        self.assertEqual(report['hyperparameters']['agents'], 2)
+        self.assertEqual(report['hyperparameters']['batch_size'], 8)
+        self.assertEqual(report['hyperparameters']['tick_ms'], 40)
+        self.assertEqual(len(report['manager']['states']), 16)
+        self.assertEqual(set(report['worker']['q_maps']), {'GOTO_LOG', 'GOTO_RIVER', 'GOTO_FAR_BANK', 'GOTO_HOUSE'})
+        self.assertEqual(len(report['worker']['visit_counts']), engine_module.GRID_ROWS)
+        self.assertEqual(len(report['agents']), 2)
+
+    def test_weights_export(self):
+        self._reset()
+        weights = self.client.get(reverse('api_export_weights')).json()
+        self.assertEqual(len(weights['manager']['model']['0.weight']), 64)
+        self.assertEqual(len(weights['worker']['target_model']['4.weight']), 4)
+
+
+class ExportBoundsTests(SimpleTestCase):
+    def test_history_stays_bounded_on_long_runs(self):
+        from .export import build_run_report
+        with mock.patch.multiple(engine_module, EVENT_HISTORY_SIZE=10, TIMESERIES_INTERVAL=1, TIMESERIES_SIZE=5):
+            engine = SimulationEngine(
+                ManagerAgent(['GOTO_LOG', 'GOTO_RIVER', 'GOTO_FAR_BANK', 'GOTO_HOUSE']),
+                WorkerAgent(["UP", "DOWN", "LEFT", "RIGHT"]),
+                num_agents=2, milestones={'picked_up': 0, 'placed': 0, 'crossed': 0, 'home': 0}, batch_size=4,
+            )
+            for _ in range(400):
+                engine.update()
+
+        self.assertGreater(engine.next_event_id, 10)
+        report = build_run_report(engine)
+        self.assertEqual(len(report['events']), 10)
+        self.assertEqual(len(report['timeseries']), 5)
+        self.assertEqual(report['events'][-1]['id'], engine.next_event_id - 1)
+        self.assertEqual(report['timeseries'][-1]['manager_step'], engine.manager_steps)
+        json.dumps(report)

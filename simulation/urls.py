@@ -7,4 +7,6 @@ urlpatterns = [
     path('api/state/', views.api_state, name='api_state'),
     path('api/q_values/', views.api_q_values, name='api_q_values'),
     path('api/manager_q_values/', views.api_manager_q_values, name='api_manager_q_values'),
+    path('api/export/', views.api_export, name='api_export'),
+    path('api/export/weights/', views.api_export_weights, name='api_export_weights'),
 ]

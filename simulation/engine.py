@@ -2,6 +2,8 @@
 
 import copy
 import random
+import threading
+import time
 from collections import deque
 
 import torch
@@ -42,6 +44,15 @@ NOVELTY_BONUS_SCALE = 5
 SUCCESS_WINDOW = 100
 # Concluded subgoals kept for the dashboard's event stream.
 EVENT_LOG_SIZE = 50
+# Concluded subgoals kept for the run export, which wants far more history
+# than the dashboard but must stay bounded on long runs.
+EVENT_HISTORY_SIZE = 5000
+# The run export's time series takes one sample every TIMESERIES_INTERVAL
+# manager steps and keeps the last TIMESERIES_SIZE of them.
+TIMESERIES_INTERVAL = 100
+TIMESERIES_SIZE = 2000
+# Training losses kept per agent, averaged into each time-series sample.
+LOSS_WINDOW = 100
 
 
 class AgentState:
@@ -110,6 +121,7 @@ class WorkerAgent:
         self.target_model = copy.deepcopy(self.model)
         self.target_sync_freq = target_sync_freq
         self.train_steps = 0
+        self.recent_losses = deque(maxlen=LOSS_WINDOW)
 
     def sync_target_network(self):
         self.target_model.load_state_dict(self.model.state_dict())
@@ -177,6 +189,7 @@ class WorkerAgent:
         nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=GRAD_CLIP_NORM)
         self.optimizer.step()
 
+        self.recent_losses.append(loss.item())
         self._record_train_steps(len(minibatch))
 
     def experience_replay(self, batch_size):
@@ -225,6 +238,7 @@ class ManagerAgent:
         self.target_model = copy.deepcopy(self.model)
         self.target_sync_freq = target_sync_freq
         self.train_steps = 0
+        self.recent_losses = deque(maxlen=LOSS_WINDOW)
 
     def sync_target_network(self):
         self.target_model.load_state_dict(self.model.state_dict())
@@ -288,6 +302,7 @@ class ManagerAgent:
         nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=GRAD_CLIP_NORM)
         self.optimizer.step()
 
+        self.recent_losses.append(loss.item())
         self._record_train_steps(len(minibatch))
 
     def experience_replay(self, batch_size):
@@ -384,6 +399,15 @@ class SimulationEngine:
         # client can tell which ones it has already shown.
         self.events = deque(maxlen=EVENT_LOG_SIZE)
         self.next_event_id = 0
+        # The same events, kept much longer for the run export.
+        self.event_history = deque(maxlen=EVENT_HISTORY_SIZE)
+        self.episode_outcomes = {'home': 0, 'drowned': 0}
+        self.timeseries = deque(maxlen=TIMESERIES_SIZE)
+        self.timeseries_boundary = 0
+        self.started_at = time.time()
+        # Held around every update() and every export, so an export never
+        # reads the engine halfway through a tick served by another thread.
+        self.lock = threading.Lock()
 
     def _get_manager_state(self, world):
         return (
@@ -408,6 +432,7 @@ class SimulationEngine:
             agent = world.agent
             if agent['status'] != AgentState.IN_PROGRESS:
                 self.recent_outcomes.append(agent['status'] == AgentState.HOME)
+                self.episode_outcomes['home' if agent['status'] == AgentState.HOME else 'drowned'] += 1
                 world.reset()
                 continue
 
@@ -532,10 +557,18 @@ class SimulationEngine:
                 elif milestone_fired or agent['status'] == AgentState.HOME: outcome = 'off-plan milestone'
                 elif reached_subgoal: outcome = 'reached, no progress'
                 else: outcome = 'timeout'
-                self.events.append({
+                event = {
                     'id': self.next_event_id, 'agent': world.id,
                     'subgoal': world.current_subgoal_name, 'outcome': outcome,
                     'reward': manager_reward,
+                }
+                self.events.append(event)
+                self.event_history.append({
+                    **event,
+                    'manager_step': self.manager_steps,
+                    'steps_taken': world.subgoal_steps,
+                    'manager_state_before': list(manager_state),
+                    'manager_state_after': list(next_manager_state),
                 })
                 self.next_event_id += 1
 
@@ -566,6 +599,31 @@ class SimulationEngine:
 
             self.worker.experience_replay(self.batch_size)
             self.manager.experience_replay(self.batch_size)
+
+        # Sample once per TIMESERIES_INTERVAL boundary crossed; one update can
+        # advance manager_steps by up to num_agents, so compare boundaries.
+        if self.manager_steps // TIMESERIES_INTERVAL > self.timeseries_boundary:
+            self.timeseries_boundary = self.manager_steps // TIMESERIES_INTERVAL
+            self._record_timeseries_sample()
+
+    def _record_timeseries_sample(self):
+        manager_eps = list(self.manager.epsilon_by_state.values()) or [self.manager.epsilon_start]
+        worker_eps = list(self.worker.epsilon_by_goal.values()) or [self.worker.epsilon_start]
+        mean = lambda xs: (sum(xs) / len(xs)) if xs else None
+        self.timeseries.append({
+            'manager_step': self.manager_steps,
+            'elapsed_s': round(time.time() - self.started_at, 3),
+            'milestones': dict(self.milestones),
+            'episodes': dict(self.episode_outcomes),
+            'success_rate': mean(self.recent_outcomes),
+            'success_sample': len(self.recent_outcomes),
+            'mean_manager_epsilon': mean(manager_eps),
+            'mean_worker_epsilon': mean(worker_eps),
+            'manager_buffer_size': len(self.manager.memory),
+            'worker_buffer_size': len(self.worker.memory),
+            'manager_mean_loss': mean(self.manager.recent_losses),
+            'worker_mean_loss': mean(self.worker.recent_losses),
+        })
 
     def get_state(self):
         # Only include what the frontend actually renders: agent position/

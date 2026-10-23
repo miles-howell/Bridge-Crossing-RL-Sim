@@ -310,6 +310,24 @@
             .agent-row .dot.done { background: var(--muted); }
             .agent-row .id { color: var(--muted); }
             .agent-row .cmd { flex: 1; color: var(--text-2); }
+
+            /* Export dialog */
+            .modal {
+                width: min(440px, calc(100vw - 32px));
+                padding: 20px;
+                border: 1px solid var(--border);
+                border-radius: var(--radius);
+                background: var(--surface);
+                color: var(--text);
+            }
+            .modal::backdrop { background: rgba(0, 0, 0, 0.5); }
+            .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+            .modal h2 { margin: 0; font-size: 16px; }
+            .modal p { margin: 8px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.45; }
+            .export-options { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+            .export-option { justify-content: flex-start; text-align: left; padding: 10px 14px; height: auto; flex-direction: column; align-items: flex-start; gap: 2px; }
+            .export-option small { font-weight: 400; font-size: 12px; opacity: 0.8; }
+            .modal .export-status { min-height: 1.45em; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
         </style>
     </head>
     <body>
@@ -336,6 +354,10 @@
                     </button>
                     <button type="button" class="btn btn-icon" id="pauseButton" aria-label="Pause" disabled>
                         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><path id="pauseIcon" d="M5 3v10M11 3v10"></path></svg>
+                    </button>
+                    <button type="button" class="btn" id="exportButton" disabled>
+                        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13.5h11"></path></svg>
+                        Export
                     </button>
                     <button type="button" class="btn btn-primary" id="resetButton">Start / reset</button>
                 </div>
@@ -443,10 +465,33 @@
             </aside>
         </div>
 
+        <dialog class="modal" id="exportDialog" aria-labelledby="exportTitle">
+            <div class="modal-head">
+                <h2 id="exportTitle">Export run</h2>
+                <button type="button" class="btn btn-icon" id="exportClose" aria-label="Close">
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4l8 8M12 4l-8 8"></path></svg>
+                </button>
+            </div>
+            <p>The simulation pauses while the snapshot is taken, then resumes.</p>
+            <div class="export-options">
+                <button type="button" class="btn btn-primary export-option" id="exportStats">
+                    Export current simulation stats
+                    <small>Agent-readable JSON: settings, metrics over time, Q-tables, events, canvas snapshots</small>
+                </button>
+                <button type="button" class="btn export-option" id="exportWeights">
+                    Export raw network weights
+                    <small>JSON of the manager and worker networks and their target copies</small>
+                </button>
+            </div>
+            <p class="export-status" id="exportStatus" role="status"></p>
+        </dialog>
+
         <script>
             const API_STATE_URL = "{% url 'api_state' %}";
             const API_Q_VALUES_URL = "{% url 'api_q_values' %}";
             const API_MANAGER_Q_VALUES_URL = "{% url 'api_manager_q_values' %}";
+            const API_EXPORT_URL = "{% url 'api_export' %}";
+            const API_EXPORT_WEIGHTS_URL = "{% url 'api_export_weights' %}";
 
             const simCanvas = document.getElementById("simulationCanvas"),
                 simCtx = simCanvas.getContext("2d");
@@ -461,6 +506,9 @@
             const resetButton = document.getElementById("resetButton");
             const pauseButton = document.getElementById("pauseButton");
             const themeToggle = document.getElementById("themeToggle");
+            const exportButton = document.getElementById("exportButton"),
+                exportDialog = document.getElementById("exportDialog"),
+                exportStatusEl = document.getElementById("exportStatus");
             const agentsSlider = document.getElementById("agentsSlider"),
                 workerLrSlider = document.getElementById("workerLrSlider"),
                 managerLrSlider = document.getElementById("managerLrSlider"),
@@ -1025,6 +1073,60 @@
                 setPaused(!paused);
             });
 
+            function downloadJson(data, prefix) {
+                const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+                const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+                const link = el("a");
+                link.href = url;
+                link.download = `${prefix}-${stamp}.json`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+            }
+            // Stops the training loop for the duration of the export (the
+            // server also locks the engine while it builds the snapshot),
+            // then resumes it unless the user had already paused.
+            async function runExport(url, prefix, withCanvases) {
+                const resume = simWorker && !paused;
+                if (resume) simWorker.postMessage({ command: "stop" });
+                statusEl.textContent = "exporting…";
+                exportStatusEl.textContent = "Building snapshot…";
+                exportDialog.querySelectorAll(".export-option").forEach((b) => (b.disabled = true));
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+                    const data = await response.json();
+                    if (withCanvases) {
+                        data.canvases = {
+                            environment: simCanvas.toDataURL("image/png"),
+                            worker_q: qCanvas.toDataURL("image/png"),
+                            manager_graph: managerCanvas.toDataURL("image/png"),
+                        };
+                    }
+                    downloadJson(data, prefix);
+                    exportStatusEl.textContent = "";
+                    exportDialog.close();
+                } catch (err) {
+                    exportStatusEl.textContent = `Export failed: ${err.message}`;
+                } finally {
+                    exportDialog.querySelectorAll(".export-option").forEach((b) => (b.disabled = false));
+                    if (resume && simWorker) {
+                        simWorker.postMessage({ command: "start", data: { ...workerStartData, speed: parseInt(speedSlider.value) || 50 } });
+                    }
+                    if (gameState) statusEl.textContent = paused ? "paused" : `${gameState.worlds.length} agent(s) learning`;
+                }
+            }
+            exportButton.addEventListener("click", () => {
+                exportStatusEl.textContent = "";
+                exportDialog.showModal();
+            });
+            document.getElementById("exportClose").addEventListener("click", () => exportDialog.close());
+            document.getElementById("exportStats").addEventListener("click", () =>
+                runExport(`${API_EXPORT_URL}?tick_ms=${parseInt(speedSlider.value) || 50}`, "nigel-run", true));
+            document.getElementById("exportWeights").addEventListener("click", () =>
+                runExport(API_EXPORT_WEIGHTS_URL, "nigel-weights", false));
+
             async function startOrResetSimulation() {
                 handleResize();
                 statusEl.textContent = "resetting…";
@@ -1034,7 +1136,7 @@
                     simWorker = null;
                 }
                 renderLoopRunning = false;
-                pauseButton.disabled = true;
+                pauseButton.disabled = exportButton.disabled = true;
                 setPaused(false);
 
                 const response = await fetch(API_STATE_URL, {
@@ -1094,7 +1196,7 @@
                         command: "start",
                         data: { ...workerStartData, speed: parseInt(speedSlider.value) || 50 },
                     });
-                    pauseButton.disabled = false;
+                    pauseButton.disabled = exportButton.disabled = false;
                 } else {
                     statusEl.textContent = "error resetting simulation";
                 }
