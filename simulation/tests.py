@@ -143,3 +143,24 @@ class EngineRewardTests(SimpleTestCase):
         self.assertEqual(len(primary), 1)
         self.assertLess(primary[0][2], -DROWNING_PENALTY + 50)
         self.assertTrue(primary[0][5])
+
+    def test_concluded_subgoal_is_logged_as_event(self):
+        self._place_crossed_agent((14, 2), 'GOTO_FAR_BANK')
+        self._step("RIGHT")
+
+        events = self.engine.get_state()['events']
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['subgoal'], 'GOTO_FAR_BANK')
+        self.assertEqual(events[0]['outcome'], 'off-plan milestone')
+        self.assertEqual(events[0]['reward'], -100)
+
+    def test_success_rate_counts_finished_episodes(self):
+        self.assertIsNone(self.engine.get_state()['success_rate'])
+        self.world.agent['status'] = AgentState.HOME
+        self.engine.update()
+        self.world.agent['status'] = AgentState.DROWNED
+        self.engine.update()
+
+        state = self.engine.get_state()
+        self.assertEqual(state['success_rate'], 0.5)
+        self.assertEqual(state['success_sample'], 2)

@@ -38,6 +38,10 @@ WORKER_SUBGOAL_BONUS = 100
 # dwarfing every other worker reward in the shared network and loss.
 DROWNING_PENALTY = 200
 NOVELTY_BONUS_SCALE = 5
+# Finished episodes (home or drowned) the header's success rate is taken over.
+SUCCESS_WINDOW = 100
+# Concluded subgoals kept for the dashboard's event stream.
+EVENT_LOG_SIZE = 50
 
 
 class AgentState:
@@ -374,6 +378,12 @@ class SimulationEngine:
         self.milestones = milestones; self.batch_size = batch_size; self.step_penalty = step_penalty
         self.worlds = [SimulationWorld(i) for i in range(num_agents)]
         self.manager_steps = 0
+        # True for each recent episode that reached home, False for a drowning.
+        self.recent_outcomes = deque(maxlen=SUCCESS_WINDOW)
+        # One entry per concluded subgoal, each with an increasing id so the
+        # client can tell which ones it has already shown.
+        self.events = deque(maxlen=EVENT_LOG_SIZE)
+        self.next_event_id = 0
 
     def _get_manager_state(self, world):
         return (
@@ -397,6 +407,7 @@ class SimulationEngine:
         for world in self.worlds:
             agent = world.agent
             if agent['status'] != AgentState.IN_PROGRESS:
+                self.recent_outcomes.append(agent['status'] == AgentState.HOME)
                 world.reset()
                 continue
 
@@ -516,6 +527,18 @@ class SimulationEngine:
                 manager_done = agent['status'] != AgentState.IN_PROGRESS
                 self.manager.train_step(manager_state, world.current_subgoal_name, manager_reward, next_manager_state, manager_done)
 
+                if agent['status'] == AgentState.DROWNED: outcome = 'drowned'
+                elif new_milestone_achieved: outcome = 'milestone'
+                elif milestone_fired or agent['status'] == AgentState.HOME: outcome = 'off-plan milestone'
+                elif reached_subgoal: outcome = 'reached, no progress'
+                else: outcome = 'timeout'
+                self.events.append({
+                    'id': self.next_event_id, 'agent': world.id,
+                    'subgoal': world.current_subgoal_name, 'outcome': outcome,
+                    'reward': manager_reward,
+                })
+                self.next_event_id += 1
+
                 for state, act, rew, next_s, ach_g in world.subgoal_trajectory:
                     # The worker is rewarded for reaching the coordinate it was
                     # actually assigned, regardless of whether that directive
@@ -564,6 +587,9 @@ class SimulationEngine:
                 },
                 'bridge_piece': w.bridge_piece,
                 'placed_bridge': w.placed_bridge,
+                'subgoal': w.current_subgoal_name,
+                'manager_state': self._get_manager_state(w)[:3],
+                'in_progress': w.agent['status'] == AgentState.IN_PROGRESS,
             }
             for w in self.worlds
         ]
@@ -572,6 +598,9 @@ class SimulationEngine:
             'worlds': worlds,
             'episodes_completed': self.manager_steps,
             'milestones': self.milestones,
+            'success_rate': (sum(self.recent_outcomes) / len(self.recent_outcomes)) if self.recent_outcomes else None,
+            'success_sample': len(self.recent_outcomes),
+            'events': list(self.events)[-20:],
             'river_start_col': first_world.river_start_col,
             'house_start_col': first_world.house_start_col,
             'house_start_row': first_world.house_start_row,
