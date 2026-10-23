@@ -7,7 +7,8 @@ This repository presents a Django-based web application designed for the interac
 
 **Simulation Layout**
 
-![image](https://github.com/user-attachments/assets/fd2c00bd-f776-4b1b-a042-68bc119b6c78)
+<img width="654" height="451" alt="Screenshot 2026-10-23 151754" src="https://github.com/user-attachments/assets/7ab65431-0643-47df-82fd-016d50356348" />
+
 
 **Worker Agent Q-value Map**
 
