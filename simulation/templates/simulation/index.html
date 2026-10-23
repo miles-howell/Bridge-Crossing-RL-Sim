@@ -746,7 +746,9 @@
             // Called once per simulation tick with the previous and new state, for
             // anything that tracks history across ticks (trails, status effects).
             // prevState is null right after a reset.
-            function onStateUpdate(prevState, newState) {}
+            function onStateUpdate(prevState, newState) {
+                updateStatusEffects(prevState, newState);
+            }
 
             // Layers, bottom to top: trail, ground marks (focus ring), sprites in
             // scene order, status overlays.
@@ -773,7 +775,105 @@
             }
             function drawAgentTrail() {}
             function drawAgentGroundMarks() {}
-            function drawAgentStatusOverlays() {}
+            // Status overlays: a log over the head while an agent carries it, and a
+            // splash where an agent drowned. Drawn in source pixels (16 per tile) so
+            // they stay on the tileset's pixel grid at any canvas size.
+            //
+            // How a drowning reaches the client: on the tick an agent steps into
+            // open water the server marks it drowned (in_progress: false) but leaves
+            // it on that water tile; the world resets on the next tick. Each poll is
+            // exactly one tick, so a world that has just stopped being in progress
+            // while standing in the river is a drowning at that tile (home is past
+            // the far bank). The splash keeps its own copy of the tile and runs on
+            // wall-clock time, so it outlives the reset and ignores the sim speed.
+            const RIVER_WATER_COLS = 3; // engine RIVER_WATER_WIDTH, right of the bank at river_start_col
+            const SPLASH_MS = 900;
+            const SPLASH_DROPS = [
+                { vx: -7, vy: -13 }, { vx: -3, vy: -17 }, { vx: 0, vy: -19 }, { vx: 3, vy: -16 },
+                { vx: 7, vy: -12 }, { vx: -10, vy: -8 }, { vx: 10, vy: -9 },
+            ];
+            let activeSplashes = [];
+            function updateStatusEffects(prevState, newState) {
+                if (!prevState) {
+                    activeSplashes = [];
+                    return;
+                }
+                const now = performance.now(), riverStartCol = newState.river_start_col;
+                newState.worlds.forEach((world, i) => {
+                    const prev = prevState.worlds[i];
+                    if (!prev || !prev.in_progress || world.in_progress) return;
+                    const { ax, ay } = world.agent;
+                    if (ax <= riverStartCol || ax > riverStartCol + RIVER_WATER_COLS) return;
+                    activeSplashes.push({ agent: i, ax, ay, start: now });
+                });
+            }
+            function isCarryingLog(world) {
+                // manager_state is (has_bridge_piece, bridge_placed, has_crossed).
+                return !!(world.manager_state && world.manager_state[0]);
+            }
+            function drawAgentStatusOverlays() {
+                const px = TILE_DEST_SIZE / TILE_SOURCE_SIZE;
+                agentDrawOrder().forEach((i) => {
+                    const world = gameState.worlds[i];
+                    if (!isAgentVisible(i) || !isCarryingLog(world)) return;
+                    simCtx.save();
+                    simCtx.globalAlpha = agentAlpha(i);
+                    drawCarriedLog(world.agent, px);
+                    simCtx.restore();
+                });
+                const now = performance.now();
+                activeSplashes = activeSplashes.filter((s) => now - s.start < SPLASH_MS);
+                activeSplashes.forEach((s) => {
+                    if (!isAgentVisible(s.agent)) return;
+                    simCtx.save();
+                    simCtx.globalAlpha = agentAlpha(s.agent);
+                    drawSplash(s, (now - s.start) / SPLASH_MS, px);
+                    simCtx.restore();
+                });
+            }
+            // The ground log (three bridge tiles, 48x16) shrunk to 18x6 and centred
+            // on the column, sitting just above the head (heads start ~6px into
+            // the upper sprite tile). Clamped so it stays on the canvas on row 0-1.
+            function drawCarriedLog(agent, px) {
+                const w = 18 * px, h = 6 * px;
+                const x = agent.ax * TILE_DEST_SIZE + (TILE_SOURCE_SIZE * px - w) / 2;
+                const y = Math.max(0, (agent.ay - 1) * TILE_DEST_SIZE - px);
+                const first = TILE_MAP.bridge_asset[0];
+                simCtx.imageSmoothingEnabled = false;
+                simCtx.drawImage(tileSheet, first.x * TILE_SOURCE_SIZE, first.y * TILE_SOURCE_SIZE,
+                    TILE_MAP.bridge_asset.length * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+            }
+            // t runs 0..1 over SPLASH_MS: the river's ripple tiles play on the tile
+            // while two rings spread across the water and droplets arc up and fall.
+            function drawSplash(s, t, px) {
+                const ox = s.ax * TILE_DEST_SIZE, oy = s.ay * TILE_DEST_SIZE;
+                const baseAlpha = simCtx.globalAlpha;
+                const dot = (x, y, size) => simCtx.fillRect(ox + Math.round(x) * px, oy + Math.round(y) * px, size * px, size * px);
+                const ripple = TILE_MAP.water_ripple[Math.min(TILE_MAP.water_ripple.length - 1, Math.floor(t * TILE_MAP.water_ripple.length))];
+                simCtx.drawImage(tileSheet, ripple.x * TILE_SOURCE_SIZE, ripple.y * TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, TILE_SOURCE_SIZE, ox, oy, TILE_DEST_SIZE, TILE_DEST_SIZE);
+                [0, 0.25].forEach((delay) => {
+                    const rt = (t - delay) / (1 - delay);
+                    if (rt <= 0) return;
+                    const rx = 3 + 10 * rt, ry = rx * 0.45;
+                    simCtx.globalAlpha = baseAlpha * (1 - rt);
+                    simCtx.fillStyle = "#e8f6ff";
+                    const steps = Math.ceil(rx * 3);
+                    for (let k = 0; k < steps; k++) {
+                        const a = (k / steps) * Math.PI * 2;
+                        dot(8 + Math.cos(a) * rx, 10 + Math.sin(a) * ry, 1);
+                    }
+                });
+                const dt = Math.min(t / 0.7, 1);
+                if (dt < 1) {
+                    simCtx.globalAlpha = baseAlpha * Math.min(1, 3 * (1 - dt));
+                    SPLASH_DROPS.forEach((d, k) => {
+                        const y = 9 + d.vy * dt * 1.6 + 30 * dt * dt;
+                        if (y > 11) return;
+                        simCtx.fillStyle = k % 2 ? "#9ad7ff" : "#ffffff";
+                        dot(7 + d.vx * dt * 1.2, y, 2);
+                    });
+                }
+            }
             function drawAgentSprite(world, i) {
                 const agent = world.agent;
                 const anim_frames = CHAR_SPRITE_MAP[agent.last_action];
