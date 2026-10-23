@@ -55,7 +55,7 @@ The `WorkerAgent` incorporates Hindsight Experience Replay (HER) to improve samp
 #### 2.3 Reward Functions
 
 * **Worker Reward:** A step penalty (`step_penalty`) is applied at each time step, plus a small count-based novelty bonus for rarely visited tiles. Reaching the assigned sub-goal coordinate earns `WORKER_SUBGOAL_BONUS` (+100), regardless of whether that sub-goal advanced the task. Drowning earns `DROWNING_PENALTY` (-200) and ends the episode. Task milestones (picking up the log, placing the bridge, crossing, reaching home) add nothing to the worker's reward. Hindsight relabels (see 2.2) use 0 for reaching the relabeled goal and -10 per step otherwise.
-* **Manager Reward:** The Manager receives a positive reward (+100) if its chosen sub-goal is achieved by the Worker within `WORKER_MAX_STEPS`, and a negative reward (-100) otherwise.
+* **Manager Reward:** The Manager receives a positive reward (+100) if its chosen sub-goal is achieved by the Worker within `WORKER_MAX_STEPS`, and a negative reward (-100) otherwise. A sub-goal ends as soon as any milestone fires, so a milestone reached under a goal that didn't ask for it (e.g. walking over the log while assigned `GOTO_RIVER`) counts as a failure and the Manager re-plans from the new state.
 
 #### 2.4 Environment
 

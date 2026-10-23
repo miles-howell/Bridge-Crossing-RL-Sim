@@ -100,7 +100,7 @@ class EngineRewardTests(SimpleTestCase):
         self.assertGreater(entries[0][2], WORKER_SUBGOAL_BONUS - 50)
         self.assertTrue(entries[0][5])
 
-    def test_milestone_adds_nothing_to_worker_reward(self):
+    def test_off_goal_milestone_ends_subtask_as_failure(self):
         world = self.world
         log = world.subgoal_locations['GOTO_LOG']
         # Walk onto the log while assigned a different goal.
@@ -112,10 +112,22 @@ class EngineRewardTests(SimpleTestCase):
 
         self.assertTrue(world.agent['has_bridge_piece'])
         self.assertEqual(self.engine.milestones['picked_up'], 1)
-        # The subtask is still running (GOTO_RIVER not reached), so the step
-        # sits in the trajectory with only step penalty + novelty bonus.
-        self.assertEqual(len(world.subgoal_trajectory), 1)
-        self.assertLess(world.subgoal_trajectory[0][2], 50)
+        # The manager gets no credit for the lucky pickup and re-plans
+        # from the new state.
+        self.assertEqual(self._manager_reward(), -100)
+        self.assertEqual(self.manager_updates[0][3][0], 1)  # next state has the log
+        self.assertTrue(world.last_subgoal_failed)
+        self.assertIsNone(world.current_subgoal_name)
+        self.assertEqual(world.agent['status'], AgentState.IN_PROGRESS)
+        # The milestone adds nothing to the worker's reward under GOTO_RIVER...
+        primary = [e for e in self.engine.worker.memory.memory if e[4] == world.subgoal_locations['GOTO_RIVER']]
+        self.assertEqual(len(primary), 1)
+        self.assertLess(primary[0][2], 50)
+        self.assertFalse(primary[0][5])
+        # ...and the hindsight relabel records reaching the log tile.
+        relabeled = [e for e in self.engine.worker.memory.memory if e[4] == log]
+        self.assertEqual(len(relabeled), 1)
+        self.assertTrue(relabeled[0][5])
 
     def test_drowning_penalty(self):
         world = self.world

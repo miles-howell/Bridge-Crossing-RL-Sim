@@ -426,6 +426,12 @@ class SimulationEngine:
             reward = -self.step_penalty
             current_pos = (agent['ax'], agent['ay'])
             new_milestone_achieved = False
+            # Any milestone, including one the assigned goal didn't ask for.
+            # The manager's state changes with every milestone, so its choice
+            # was made for a state that no longer holds: ending the subtask
+            # lets it re-plan, and scoring an off-goal milestone as a failure
+            # keeps it from crediting a goal for progress it got by luck.
+            milestone_fired = False
             # Worker-only novelty shaping -- doesn't affect the manager's
             # reward (computed separately below from new_milestone_achieved).
             reward += self.worker.novelty_bonus(current_pos)
@@ -441,7 +447,7 @@ class SimulationEngine:
             if not world.milestones_rewarded['log_picked_up'] and world.bridge_piece:
                 if current_pos == world.subgoal_locations['GOTO_LOG']:
                     agent['has_bridge_piece'] = True; world.bridge_piece = None
-                    self.milestones['picked_up'] += 1
+                    self.milestones['picked_up'] += 1; milestone_fired = True
                     world.milestones_rewarded['log_picked_up'] = True
                     if world.current_subgoal_name == 'GOTO_LOG':
                         new_milestone_achieved = True
@@ -451,7 +457,7 @@ class SimulationEngine:
                 if current_pos == world.subgoal_locations['GOTO_RIVER']:
                     world.placed_bridge = { "ax": world.river_start_col + RIVER_BORDER_WIDTH, "ay": world.bridge_y_pos_tiles }
                     agent['has_bridge_piece'] = False
-                    self.milestones['placed'] += 1
+                    self.milestones['placed'] += 1; milestone_fired = True
                     world.milestones_rewarded['bridge_placed'] = True
                     if world.current_subgoal_name == 'GOTO_RIVER':
                         new_milestone_achieved = True
@@ -464,7 +470,7 @@ class SimulationEngine:
                 # happened via the bridge. Same x threshold as GOTO_FAR_BANK.
                 if agent['ax'] >= world.subgoal_locations['GOTO_FAR_BANK'][0]:
                     agent['has_crossed'] = True
-                    self.milestones['crossed'] += 1
+                    self.milestones['crossed'] += 1; milestone_fired = True
                     world.milestones_rewarded['crossed_bridge'] = True
                     if world.current_subgoal_name == 'GOTO_FAR_BANK':
                         new_milestone_achieved = True
@@ -492,7 +498,7 @@ class SimulationEngine:
             # leaving the worker to wander out the rest of WORKER_MAX_STEPS.
             subgoal_timed_out = (world.subgoal_steps >= WORKER_MAX_STEPS)
             reached_subgoal = world.reaches_subgoal(current_pos, world.current_subgoal_name)
-            subtask_is_over = new_milestone_achieved or reached_subgoal or subgoal_timed_out or agent['status'] != AgentState.IN_PROGRESS
+            subtask_is_over = milestone_fired or reached_subgoal or subgoal_timed_out or agent['status'] != AgentState.IN_PROGRESS
 
             next_worker_state = self._get_worker_state(world)
             achieved_goal = (agent['ax'], agent['ay'])
