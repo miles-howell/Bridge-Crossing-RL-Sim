@@ -149,6 +149,31 @@ class EngineRewardTests(SimpleTestCase):
         self.assertLess(primary[0][2], -DROWNING_PENALTY + 50)
         self.assertTrue(primary[0][5])
 
+    def test_drowning_tick_is_visible_in_state(self):
+        # The map's splash and log icon read these get_state fields: the
+        # drowning tick still shows the agent on its water tile, no longer in
+        # progress (and still carrying the log); the next tick resets it.
+        world = self.world
+        x = world.river_start_col + 1
+        world.agent.update(ax=x - 1, ay=world.bridge_y_pos_tiles + 1, has_bridge_piece=True)
+        world.bridge_piece = None
+        world.milestones_rewarded['log_picked_up'] = True
+        world.current_subgoal_name = 'GOTO_RIVER'
+        world.current_subgoal_coord = world.subgoal_locations['GOTO_RIVER']
+        world.last_manager_state = self.engine._get_manager_state(world)
+        self._step("RIGHT")
+
+        drowned = self.engine.get_state()['worlds'][0]
+        self.assertFalse(drowned['in_progress'])
+        self.assertEqual((drowned['agent']['ax'], drowned['agent']['ay']), (x, world.bridge_y_pos_tiles + 1))
+        self.assertEqual(drowned['manager_state'][0], 1)
+
+        self.engine.update()
+        reset = self.engine.get_state()['worlds'][0]
+        self.assertTrue(reset['in_progress'])
+        self.assertEqual((reset['agent']['ax'], reset['agent']['ay']), (1, 1))
+        self.assertEqual(reset['manager_state'][0], 0)
+
     def test_concluded_subgoal_is_logged_as_event(self):
         self._place_crossed_agent((14, 2), 'GOTO_FAR_BANK')
         self._step("RIGHT")
