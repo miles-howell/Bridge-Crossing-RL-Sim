@@ -307,7 +307,23 @@ class SimulationWorld:
             'GOTO_FAR_BANK': (self.river_start_col + RIVER_TOTAL_WIDTH - 1, self.bridge_y_pos_tiles),
             'GOTO_HOUSE': (self.house_start_col, self.house_start_row + HOUSE_HEIGHT_TILES - 1)
         }
+        # Every tile the house sprite covers counts as home, not just the
+        # GOTO_HOUSE coord -- otherwise an agent can visibly walk over the
+        # house and get no credit for it. GOTO_HOUSE stays a single coord
+        # because it's also the worker's goal input.
+        self.house_tiles = {
+            (c, r)
+            for c in range(self.house_start_col, self.house_start_col + HOUSE_WIDTH_TILES)
+            for r in range(self.house_start_row, self.house_start_row + HOUSE_HEIGHT_TILES)
+        }
         self.reset()
+
+    def reaches_subgoal(self, pos, subgoal_name):
+        """Whether pos satisfies the given subgoal: any house tile for
+        GOTO_HOUSE, the exact coord for everything else."""
+        if subgoal_name == 'GOTO_HOUSE':
+            return tuple(pos) in self.house_tiles
+        return tuple(pos) == self.subgoal_locations.get(subgoal_name)
 
     def reset(self):
         self.agent = { "id": self.id, "ax": 1, "ay": 1, "has_bridge_piece": False, "has_crossed": False, "status": AgentState.IN_PROGRESS, "animation_frame": 0 }
@@ -446,11 +462,18 @@ class SimulationEngine:
                         new_milestone_achieved = True
 
             # Event: Reach Home (This is a terminal state, so no reward flag is needed)
-            if world.current_subgoal_name == 'GOTO_HOUSE' and agent['has_crossed'] and current_pos == world.subgoal_locations['GOTO_HOUSE']:
+            # Like the milestones above, the event itself fires under any
+            # subgoal, but only GOTO_HOUSE earns credit. The +1000 also goes
+            # to the worker only under GOTO_HOUSE: under any other goal it
+            # would teach the worker "given goal X, walk to the house". The
+            # hindsight relabel below still gives it the trajectory under
+            # the tile it actually reached.
+            if agent['has_crossed'] and current_pos in world.house_tiles:
                 agent['status'] = AgentState.HOME
                 self.milestones['home'] += 1
-                reward += 1000
-                new_milestone_achieved = True
+                if world.current_subgoal_name == 'GOTO_HOUSE':
+                    reward += 1000
+                    new_milestone_achieved = True
 
             # Drowning is always possible
             is_in_river_area = world.river_start_col < agent['ax'] < world.river_start_col + RIVER_TOTAL_WIDTH - 1
@@ -458,9 +481,13 @@ class SimulationEngine:
                 is_on_bridge = world.placed_bridge and world.placed_bridge['ay'] == agent['ay']
                 if not is_on_bridge: agent['status'] = AgentState.DROWNED; reward -= 1000
 
-            # Determine if the subtask is over
+            # Determine if the subtask is over. Reaching the assigned tile ends
+            # it even when no milestone fired (e.g. GOTO_FAR_BANK after
+            # already crossing), so a stale directive fails fast instead of
+            # leaving the worker to wander out the rest of WORKER_MAX_STEPS.
             subgoal_timed_out = (world.subgoal_steps >= WORKER_MAX_STEPS)
-            subtask_is_over = new_milestone_achieved or subgoal_timed_out or agent['status'] != AgentState.IN_PROGRESS
+            reached_subgoal = world.reaches_subgoal(current_pos, world.current_subgoal_name)
+            subtask_is_over = new_milestone_achieved or reached_subgoal or subgoal_timed_out or agent['status'] != AgentState.IN_PROGRESS
 
             next_worker_state = self._get_worker_state(world)
             achieved_goal = (agent['ax'], agent['ay'])
@@ -484,13 +511,17 @@ class SimulationEngine:
                     # was a good one -- that judgment belongs to the manager's
                     # reward above, not the worker's. This keeps "did I follow
                     # orders" separate from "were the orders any good".
-                    reached_assigned_subgoal = (ach_g == world.current_subgoal_coord)
+                    reached_assigned_subgoal = world.reaches_subgoal(ach_g, world.current_subgoal_name)
                     worker_rew = rew + (WORKER_SUBGOAL_BONUS if reached_assigned_subgoal else 0)
                     done = reached_assigned_subgoal or agent['status'] != AgentState.IN_PROGRESS
                     self.worker.memory.add(state, act, worker_rew, next_s, world.current_subgoal_coord, done)
 
-                if not new_milestone_achieved:
-                    imaginary_goal = world.subgoal_trajectory[-1][4]
+                imaginary_goal = world.subgoal_trajectory[-1][4]
+                # Skip the relabel when it would just be the assigned goal
+                # again: the primary experiences above already cover it, and
+                # a duplicate with a different reward would give the same
+                # (state, goal) pair two conflicting targets.
+                if not new_milestone_achieved and imaginary_goal != world.current_subgoal_coord:
                     for state, act, _, next_s, ach_g in world.subgoal_trajectory:
                         h_reward = self._compute_hindsight_reward(ach_g, imaginary_goal)
                         h_done = (ach_g == imaginary_goal)
