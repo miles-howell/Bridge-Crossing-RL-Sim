@@ -52,6 +52,8 @@
                 --pill-muted: #8b95a5;
                 --pill-track: #1e3a2a;
                 --spark: #38bdf8;
+                --trail-rgb: 245, 165, 36;
+                --trail-casing-rgb: 14, 17, 22;
                 --font-sans: "Inter Tight", system-ui, sans-serif;
                 --font-mono: "JetBrains Mono", ui-monospace, monospace;
                 --head-font: var(--font-mono);
@@ -88,6 +90,8 @@
                 --pill-muted: rgba(255, 255, 255, 0.85);
                 --pill-track: rgba(255, 255, 255, 0.3);
                 --spark: #1f4fd8;
+                --trail-rgb: 17, 20, 24;
+                --trail-casing-rgb: 255, 255, 255;
                 --font-sans: "Inter", system-ui, sans-serif;
                 --font-mono: "Roboto Mono", ui-monospace, monospace;
                 --head-font: var(--font-sans);
@@ -574,6 +578,8 @@
                     negRgb: v("--neg-rgb"),
                     qPosRgb: v("--q-pos-rgb"),
                     qNegRgb: v("--q-neg-rgb"),
+                    trailRgb: v("--trail-rgb"),
+                    trailCasingRgb: v("--trail-casing-rgb"),
                     font: v("--font-sans"),
                 };
             }
@@ -746,7 +752,9 @@
             // Called once per simulation tick with the previous and new state, for
             // anything that tracks history across ticks (trails, status effects).
             // prevState is null right after a reset.
-            function onStateUpdate(prevState, newState) {}
+            function onStateUpdate(prevState, newState) {
+                updateTrails(prevState, newState);
+            }
 
             // Layers, bottom to top: trail, ground marks (focus ring), sprites in
             // scene order, status overlays.
@@ -771,7 +779,59 @@
             function agentAlpha(i) {
                 return 1;
             }
-            function drawAgentTrail() {}
+            // Recent tiles per agent (world index -> [{x, y, start}], oldest first),
+            // kept for every agent so a trail is ready the moment one is focused.
+            // `start` marks a point that must not join the one before it.
+            const TRAIL_LENGTH = 30;
+            let agentTrails = [];
+            function updateTrails(prevState, newState) {
+                const worlds = newState && newState.worlds;
+                if (!worlds) return;
+                if (!prevState || agentTrails.length !== worlds.length) agentTrails = worlds.map(() => []);
+                worlds.forEach((world, i) => {
+                    const trail = agentTrails[i], { ax: x, ay: y } = world.agent;
+                    const last = trail[trail.length - 1];
+                    // Standing still (e.g. walking into the edge) adds no point.
+                    if (last && last.x === x && last.y === y) return;
+                    // Break the line when the previous tick ended the episode
+                    // (this tick is the respawn) or the agent moved more than a tile.
+                    const prevWorld = prevState && prevState.worlds[i];
+                    const start = !last || (prevWorld && !prevWorld.in_progress) || Math.abs(last.x - x) + Math.abs(last.y - y) > 1;
+                    trail.push({ x, y, start });
+                    if (trail.length > TRAIL_LENGTH) trail.shift();
+                });
+            }
+            // The focused agent's trail through tile centres at foot level, fading
+            // with age. Each point gets its own short path from the midpoint before
+            // it to the midpoint after it, so the per-point alpha never overlaps.
+            function drawAgentTrail() {
+                const i = focusedAgent();
+                if (i === null || !isAgentVisible(i) || !agentTrails[i]) return;
+                const trail = agentTrails[i], n = trail.length;
+                if (n < 2) return;
+                const t = TILE_DEST_SIZE, px = (p) => (p.x + 0.5) * t, py = (p) => (p.y + 0.5) * t;
+                const width = t * 0.15;
+                simCtx.save();
+                simCtx.lineCap = "butt";
+                simCtx.lineJoin = "round";
+                [[theme.trailCasingRgb, width + t * 0.08, 0.7], [theme.trailRgb, width, 1]].forEach(([rgb, w, alphaScale]) => {
+                    for (let k = 0; k < n; k++) {
+                        const p = trail[k], prev = p.start ? null : trail[k - 1], next = trail[k + 1] && !trail[k + 1].start ? trail[k + 1] : null;
+                        if (!prev && !next) continue;
+                        // age 0 is the newest point.
+                        const fresh = 1 - (n - 1 - k) / TRAIL_LENGTH;
+                        simCtx.strokeStyle = `rgba(${rgb}, ${(0.2 + 0.8 * fresh) * alphaScale})`;
+                        simCtx.lineWidth = w * (0.5 + 0.5 * fresh);
+                        simCtx.beginPath();
+                        if (prev) simCtx.moveTo((px(prev) + px(p)) / 2, (py(prev) + py(p)) / 2);
+                        else simCtx.moveTo(px(p), py(p));
+                        simCtx.lineTo(px(p), py(p));
+                        if (next) simCtx.lineTo((px(p) + px(next)) / 2, (py(p) + py(next)) / 2);
+                        simCtx.stroke();
+                    }
+                });
+                simCtx.restore();
+            }
             function drawAgentGroundMarks() {}
             function drawAgentStatusOverlays() {}
             function drawAgentSprite(world, i) {
