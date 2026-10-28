@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nigel's Quest · Hierarchical RL you can watch learn</title>
+  <meta name="description" content="A Django app that trains a two-level hierarchical reinforcement learning agent to build a bridge, cross a river and get home, and shows every step live in the browser.">
+  <meta property="og:title" content="Nigel's Quest">
+  <meta property="og:description" content="A manager DQN plans, a goal-conditioned worker DQN walks. Watch them learn to build a bridge and get home.">
+  <meta property="og:image" content="https://nigel.plannedpixel.com/assets/app-training.png">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top"><img src="assets/favicon.svg" alt="" width="22" height="22">Nigel's Quest</a>
+      <nav class="nav-links" aria-label="Sections">
+        <a href="#task">The task</a>
+        <a href="#how">How it works</a>
+        <a href="#rewards">Rewards</a>
+        <a href="#watch">Watch it learn</a>
+        <a href="#run">Run it</a>
+      </nav>
+      <a class="btn btn-ghost btn-sm" href="https://github.com/miles-howell/bridge-crossing-rl-sim">GitHub</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="wrap">
+        <p class="eyebrow">Hierarchical reinforcement learning · Django · PyTorch</p>
+        <h1>Teach Nigel to build a bridge, then watch him learn.</h1>
+        <p class="lede">Nigel has to pick up a log, lay it across a river, cross, and walk into his house. A <strong class="c-manager">manager</strong> network decides which of those steps to try next. A <strong class="c-worker">worker</strong> network learns how to walk wherever the manager points. Training runs on the server, and the browser shows every move as it happens.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="#run">Run it locally</a>
+          <a class="btn btn-ghost" href="https://github.com/miles-howell/bridge-crossing-rl-sim">View the source</a>
+        </div>
+        <figure class="hero-media">
+          <img src="assets/hero.gif" width="1200" height="420" alt="Nigel walks a 20 by 12 grid, picks up a log, lays it across the river as a bridge, crosses and walks into the house, while the manager's current sub-goal updates beside him">
+        </figure>
+        <dl class="stats">
+          <div><dt>Grid</dt><dd>20 × 12</dd></div>
+          <div><dt>Agents</dt><dd>up to 10</dd></div>
+          <div><dt>Sub-goals</dt><dd>4</dd></div>
+          <div><dt>Networks</dt><dd>2 DQNs</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <!-- The task -->
+    <section id="task" class="section">
+      <div class="wrap">
+        <p class="eyebrow">01 · The task</p>
+        <h2>Four steps, one reward at the very end.</h2>
+        <p class="section-lede">Reaching the house only counts once the bridge is built and crossed, and walking into the river ends the episode. A flat agent wandering at random almost never stumbles onto the whole sequence, so it almost never sees a reward to learn from. Splitting the problem in two is what makes it learnable.</p>
+
+        <div class="task-grid">
+          <figure class="map card">
+            <svg viewBox="0 0 600 360" role="img" aria-labelledby="map-title map-desc">
+              <title id="map-title">The 20 by 12 world</title>
+              <desc id="map-desc">Nigel starts in the top-left. The log lies near the bottom-left. A five-column river runs down the middle; the bridge goes at its left bank on row 6. The house sits on the right side near the top. A dashed route visits log, river, far bank and house in order.</desc>
+              <defs>
+                <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+                  <path d="M30 0H0V30" fill="none" class="map-gridline"/>
+                </pattern>
+              </defs>
+              <rect width="600" height="360" class="map-grass"/>
+              <rect x="240" y="0" width="150" height="360" class="map-bank"/>
+              <rect x="270" y="0" width="90" height="360" class="map-water"/>
+              <rect width="600" height="360" fill="url(#grid)"/>
+              <!-- bridge -->
+              <rect x="270" y="186" width="90" height="18" rx="4" class="map-bridge"/>
+              <!-- log -->
+              <rect x="66" y="276" width="78" height="18" rx="7" class="map-log"/>
+              <!-- house -->
+              <rect x="450" y="30" width="60" height="90" rx="4" class="map-house"/>
+              <path d="M444 46 L480 22 L516 46" class="map-roof"/>
+              <!-- route -->
+              <polyline points="45,45 45,285 105,285" class="route r1"/>
+              <polyline points="105,285 105,195 255,195" class="route r2"/>
+              <polyline points="255,195 375,195" class="route r3"/>
+              <polyline points="375,195 375,105 465,105" class="route r4"/>
+              <!-- markers -->
+              <g class="pin pin-start"><circle cx="45" cy="45" r="11"/><text x="45" y="49">S</text></g>
+              <g class="pin"><circle cx="105" cy="285" r="11"/><text x="105" y="289">1</text></g>
+              <g class="pin"><circle cx="255" cy="195" r="11"/><text x="255" y="199">2</text></g>
+              <g class="pin"><circle cx="375" cy="195" r="11"/><text x="375" y="199">3</text></g>
+              <g class="pin"><circle cx="465" cy="105" r="11"/><text x="465" y="109">4</text></g>
+              <text x="315" y="22" class="map-label">river</text>
+            </svg>
+            <figcaption>The real layout from <code>engine.py</code>, one square per tile. The bridge spans the three water tiles once it's placed.</figcaption>
+          </figure>
+
+          <ol class="steps">
+            <li>
+              <span class="step-n">1</span>
+              <div><code class="goal">GOTO_LOG</code><h3>Pick up the log</h3><p>Walk onto the log's centre tile at (3, 9). Milestone: <em>has log</em>.</p></div>
+            </li>
+            <li>
+              <span class="step-n">2</span>
+              <div><code class="goal">GOTO_RIVER</code><h3>Place the bridge</h3><p>Carry it to the near bank at (8, 6). Milestone: <em>bridge placed</em>.</p></div>
+            </li>
+            <li>
+              <span class="step-n">3</span>
+              <div><code class="goal">GOTO_FAR_BANK</code><h3>Cross the river</h3><p>Walk over the bridge to (12, 6). Step on water anywhere else and Nigel drowns. Milestone: <em>crossed</em>.</p></div>
+            </li>
+            <li>
+              <span class="step-n">4</span>
+              <div><code class="goal">GOTO_HOUSE</code><h3>Go home</h3><p>Any tile of the house counts. Episode over, success.</p></div>
+            </li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section id="how" class="section alt">
+      <div class="wrap">
+        <p class="eyebrow">02 · How it works</p>
+        <h2>One network plans. The other walks.</h2>
+        <p class="section-lede">Both are small deep Q-networks, but they see different things, choose different kinds of actions, and are paid for different things. The manager issues a sub-goal, the worker gets up to 75 steps to reach it, and when that attempt ends the manager picks the next one.</p>
+
+        <div class="arch">
+          <article class="card agent manager">
+            <header><h3>Manager</h3><span class="tag">DQN · plans</span></header>
+            <dl>
+              <dt>Sees</dt>
+              <dd><span class="chip">has log</span><span class="chip">bridge placed</span><span class="chip">crossed</span><span class="chip">last goal failed</span></dd>
+              <dt>Picks</dt>
+              <dd>One of four sub-goals: log, river, far bank, house.</dd>
+              <dt>Paid for</dt>
+              <dd><b class="pos">+100</b> if its sub-goal produced the milestone it asked for, <b class="neg">−100</b> if it didn't.</dd>
+            </dl>
+          </article>
+
+          <div class="arrow" aria-hidden="true">
+            <span>sub-goal<br>coordinate</span>
+            <svg viewBox="0 0 80 24"><path d="M0 12H70M62 4l10 8-10 8"/></svg>
+          </div>
+
+          <article class="card agent worker">
+            <header><h3>Worker</h3><span class="tag">goal-conditioned DQN · walks</span></header>
+            <dl>
+              <dt>Sees</dt>
+              <dd><span class="chip">x, y</span><span class="chip">3 progress flags</span><span class="chip">goal x, y</span></dd>
+              <dt>Picks</dt>
+              <dd>A move: up, down, left or right.</dd>
+              <dt>Paid for</dt>
+              <dd><b class="pos">+100</b> for reaching the tile it was sent to, a small step penalty, a novelty bonus, and <b class="neg">−200</b> for drowning.</dd>
+            </dl>
+          </article>
+        </div>
+
+        <div class="cols3">
+          <div>
+            <h3>The worker doesn't need to know <em>why</em>.</h3>
+            <p>Because the goal coordinate is part of its input, one worker network learns to reach any tile. It never has to understand logs or bridges; that's the manager's job.</p>
+          </div>
+          <div>
+            <h3>The manager gets one bit of memory.</h3>
+            <p>Without the <em>last goal failed</em> flag, every decision looks like a first attempt. With it, the manager can learn to retry a correct plan after a clumsy worker run instead of abandoning it.</p>
+          </div>
+          <div>
+            <h3>Exploration is tracked per state.</h3>
+            <p>Epsilon decays separately for each manager state and each worker goal, so a stage the agents rarely reach isn't stuck with exploration already worn down by earlier ones.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Rewards -->
+    <section id="rewards" class="section">
+      <div class="wrap">
+        <p class="eyebrow">03 · Rewards</p>
+        <h2>Each network is paid only for what it controls.</h2>
+        <div class="split">
+          <div class="prose">
+            <p>Hierarchical agents have a well-known failure mode: train two separate value estimators toward one shared goal, and a run of worker mistakes can drag the manager's estimates far from a plan that was already right. The margin for error is thin.</p>
+            <p>Nigel's Quest avoids this by decoupling the rewards completely. The manager is graded on whether its <em>choice</em> moved the task forward. The worker is graded on whether it <em>followed orders</em>, good orders or not.</p>
+            <p>The worker deliberately gets no share of the task milestones. Each milestone fires on the same tile as the goal that asks for it, so paying it to the worker would only duplicate its goal bonus, make some goals worth far more than others inside one shared network, and credit milestones hit by accident under a goal that didn't ask for them.</p>
+            <p class="note">A sub-goal ends the moment <em>any</em> milestone fires. Walking over the log while sent to the river counts as a manager failure, and the manager re-plans from the new state.</p>
+          </div>
+          <div class="card table-card">
+            <table>
+              <caption>Reward table</caption>
+              <thead><tr><th>Event</th><th>Manager</th><th>Worker</th></tr></thead>
+              <tbody>
+                <tr><td>Sub-goal produced its milestone</td><td class="pos">+100</td><td class="dim">—</td></tr>
+                <tr><td>Sub-goal failed or timed out</td><td class="neg">−100</td><td class="dim">—</td></tr>
+                <tr><td>Reached the assigned tile</td><td class="dim">—</td><td class="pos">+100</td></tr>
+                <tr><td>Each step</td><td class="dim">—</td><td class="neg">−step penalty</td></tr>
+                <tr><td>Rarely visited tile</td><td class="dim">—</td><td class="pos">+novelty</td></tr>
+                <tr><td>Drowned</td><td class="dim">—</td><td class="neg">−200, episode ends</td></tr>
+                <tr><td>Task milestones themselves</td><td class="dim">via sub-goal</td><td class="dim">0</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="her card">
+          <div class="her-text">
+            <p class="eyebrow">Hindsight experience replay</p>
+            <h3>Failed walks still teach something.</h3>
+            <p>When an attempt ends short of its goal, the attempt is stored twice: once as the failure it was, and once relabelled as if the tile it ended on had been the goal all along. That second copy is a success, so the worker learns to reach <em>somewhere</em> from every attempt, which is exactly the skill a goal-conditioned network needs.</p>
+          </div>
+          <svg class="her-fig" viewBox="0 0 320 170" role="img" aria-labelledby="her-title">
+            <title id="her-title">A failed path toward goal G ends at tile T, and is replayed as a successful path to T</title>
+            <g class="her-panel">
+              <text x="10" y="18" class="her-cap">real</text>
+              <path d="M20 140 C 50 120, 60 70, 110 80" class="her-path"/>
+              <circle cx="20" cy="140" r="5" class="her-start"/>
+              <circle cx="110" cy="80" r="6" class="her-end"/>
+              <rect x="120" y="22" width="22" height="22" rx="4" class="her-goal"/><text x="131" y="38" class="her-glyph">G</text>
+              <text x="64" y="160" class="her-out neg">goal missed</text>
+            </g>
+            <g class="her-panel" transform="translate(170 0)">
+              <text x="10" y="18" class="her-cap">relabelled</text>
+              <path d="M20 140 C 50 120, 60 70, 110 80" class="her-path"/>
+              <circle cx="20" cy="140" r="5" class="her-start"/>
+              <rect x="99" y="69" width="22" height="22" rx="4" class="her-goal ok"/><text x="110" y="85" class="her-glyph">T</text>
+              <text x="64" y="160" class="her-out pos">goal reached</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- Watch it learn -->
+    <section id="watch" class="section alt">
+      <div class="wrap">
+        <p class="eyebrow">04 · Watch it learn</p>
+        <h2>Every number the networks use, on screen.</h2>
+        <p class="section-lede">The dashboard is built for seeing <em>why</em> a run is stuck, not just that it is. This is a real ten-agent run, 90 seconds in: the log has been picked up 27 times and a bridge placed once, but nobody has crossed yet.</p>
+        <figure class="shot">
+          <img src="assets/app-training.png" width="1440" height="662" loading="lazy" alt="The app 90 seconds into a 10-agent run: hyperparameter sliders, the grid world with agents near the log, the worker's Q-value heatmap, the manager's Q-table, the event stream and milestone counters">
+        </figure>
+        <ul class="features">
+          <li><h3>Environment</h3><p>Up to ten agents share the same map, each with its own world and the same two networks.</p></li>
+          <li><h3>Worker max Q(s, ·)</h3><p>A heatmap of how valuable the worker thinks each tile is, for each of the four goals.</p></li>
+          <li><h3>Manager Q(s, a)</h3><p>The manager's value for every sub-goal at every stage of the task.</p></li>
+          <li><h3>Policy graph</h3><p>Which sub-goal the manager prefers from each state. Feedback loops show where it gets stuck.</p></li>
+          <li><h3>Milestones &amp; events</h3><p>How often each step is reached, and why every sub-goal ended.</p></li>
+          <li><h3>Live hyperparameters</h3><p>Agents, discount, learning rates, batch size and step penalty apply on reset; tick speed applies live.</p></li>
+          <li><h3>Export</h3><p>Download a versioned JSON run report, or the raw network weights.</p></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- Under the hood -->
+    <section class="section">
+      <div class="wrap">
+        <p class="eyebrow">05 · Under the hood</p>
+        <h2>Small networks, on purpose.</h2>
+        <div class="specs card">
+          <table>
+            <thead><tr><th></th><th class="c-manager">Manager</th><th class="c-worker">Worker</th></tr></thead>
+            <tbody>
+              <tr><th>Input</th><td>4 flags</td><td>7 values: x, y, 3 flags, goal x, goal y</td></tr>
+              <tr><th>Network</th><td colspan="2">MLP 64 → 64, ReLU, Adam, MSE on bootstrapped TD targets, grad-norm clip 1.0</td></tr>
+              <tr><th>Output</th><td>Q for 4 sub-goals</td><td>Q for 4 moves</td></tr>
+              <tr><th>Replay buffer</th><td>10,000</td><td>20,000, plus hindsight relabels</td></tr>
+              <tr><th>Target network</th><td colspan="2">Synced every 500 training steps</td></tr>
+              <tr><th>Exploration</th><td>ε per manager state</td><td>ε per goal</td></tr>
+              <tr><th>Default learning rate</th><td>0.01</td><td>0.001</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="small">The browser polls <code>/simulation/api/state/</code> from a Web Worker, and each poll advances every world by one tick. PyTorch is pinned to a single thread: at this size, coordinating threads costs more than the matrix multiplications themselves.</p>
+      </div>
+    </section>
+
+    <!-- Run it -->
+    <section id="run" class="section alt">
+      <div class="wrap">
+        <p class="eyebrow">06 · Run it</p>
+        <h2>Up and training in a minute.</h2>
+        <div class="split">
+          <div class="code card">
+            <div class="code-bar"><span>Terminal</span><button class="copy" type="button" data-copy="run-cmds">Copy</button></div>
+<pre id="run-cmds"><code>git clone https://github.com/miles-howell/bridge-crossing-rl-sim.git
+cd bridge-crossing-rl-sim
+python -m venv venv &amp;&amp; source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python manage.py migrate
+python manage.py runserver</code></pre>
+          </div>
+          <div class="prose">
+            <p>Then open <a href="http://127.0.0.1:8000/simulation/"><code>127.0.0.1:8000/simulation/</code></a> and press <b>Start / reset</b>.</p>
+            <ul class="checks">
+              <li>Python 3.13. The requirements pull the CPU-only PyTorch build, so no multi-gigabyte CUDA download.</li>
+              <li><code>SECRET_KEY</code> in <code>.env</code> is required. Any non-empty string works locally.</li>
+              <li><code>migrate</code> creates the SQLite session table the simulation needs.</li>
+              <li>Mind the <code>/simulation/</code> prefix; the root URL is a 404.</li>
+              <li>Run the tests with <code>python manage.py test</code>.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Cast -->
+    <section class="section cast-section">
+      <div class="wrap">
+        <p class="eyebrow">The cast</p>
+        <h2>Nigel, and nine friends learning alongside him.</h2>
+        <img class="cast" src="assets/cast.png" width="784" height="128" loading="lazy" alt="Ten pixel-art characters: Nigel, then an aviator, beekeeper, builder, engineer, fisher, gardener, hiker, painter and sailor">
+        <p class="small">World tiles and Nigel are from ArMM1998's free <a href="https://opengameart.org/content/zelda-like-tilesets-and-sprites">Zelda-like spritepack</a> on OpenGameArt. The other nine are generated from text pixel grids by <code>tools/sprites/</code>.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <span>Nigel's Quest · <a href="https://github.com/miles-howell/bridge-crossing-rl-sim">bridge-crossing-rl-sim</a></span>
+      <span>Apache-2.0 · by <a href="https://github.com/miles-howell">Miles Howell</a></span>
+    </div>
+  </footer>
+
+  <script>
+    document.querySelectorAll('[data-copy]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var text = document.getElementById(btn.dataset.copy).innerText;
+        navigator.clipboard.writeText(text).then(function () {
+          btn.textContent = 'Copied';
+          setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+        });
+      });
+    });
+  </script>
+</body>
+</html>
