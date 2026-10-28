@@ -34,16 +34,21 @@
     <!-- Hero -->
     <section class="hero">
       <div class="wrap">
-        <p class="eyebrow">Hierarchical reinforcement learning · Django · PyTorch</p>
-        <h1>Teach Nigel to build a bridge, then watch him learn.</h1>
-        <p class="lede">Nigel has to pick up a log, lay it across a river, cross, and walk into his house. A <strong class="c-manager">manager</strong> network decides which of those steps to try next. A <strong class="c-worker">worker</strong> network learns how to walk wherever the manager points. Training runs on the server, and the browser shows every move as it happens.</p>
-        <div class="cta">
-          <a class="btn btn-primary" href="#run">Run it locally</a>
-          <a class="btn btn-ghost" href="https://github.com/miles-howell/bridge-crossing-rl-sim">View the source</a>
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">Hierarchical reinforcement learning · Django · PyTorch</p>
+            <h1>Teach Nigel to build a bridge, then watch him learn.</h1>
+            <p class="lede">Nigel has to pick up a log, lay it across a river, cross, and walk into his house. A <strong class="c-manager">manager</strong> network decides which of those steps to try next. A <strong class="c-worker">worker</strong> network learns how to walk wherever the manager points. Training runs on the server, and the browser shows every move as it happens.</p>
+            <div class="cta">
+              <a class="btn btn-primary" href="#run">Run it locally</a>
+              <a class="btn btn-ghost" href="https://github.com/miles-howell/bridge-crossing-rl-sim">View the source</a>
+            </div>
+          </div>
+          <figure class="hero-media card">
+            <img src="assets/nigel-walk.gif" width="520" height="312" alt="Nigel walks the 20 by 12 grid: he picks up the log at pin 1, lays it across the river at pin 2, crosses to pin 3 and walks into the house at pin 4">
+            <figcaption>Spawn → <span>1</span> log → <span>2</span> river → <span>3</span> far bank → <span>4</span> house</figcaption>
+          </figure>
         </div>
-        <figure class="hero-media">
-          <img src="assets/hero.gif" width="1200" height="420" alt="Nigel walks a 20 by 12 grid, picks up a log, lays it across the river as a bridge, crosses and walks into the house, while the manager's current sub-goal updates beside him">
-        </figure>
         <dl class="stats">
           <div><dt>Grid</dt><dd>20 × 12</dd></div>
           <div><dt>Agents</dt><dd>up to 10</dd></div>
@@ -57,45 +62,8 @@
     <section id="task" class="section">
       <div class="wrap">
         <p class="eyebrow">01 · The task</p>
-        <h2>Four steps, one reward at the very end.</h2>
+        <h2>Four steps, and only the last one finishes the job.</h2>
         <p class="section-lede">Reaching the house only counts once the bridge is built and crossed, and walking into the river ends the episode. A flat agent wandering at random almost never stumbles onto the whole sequence, so it almost never sees a reward to learn from. Splitting the problem in two is what makes it learnable.</p>
-
-        <div class="task-grid">
-          <figure class="map card">
-            <svg viewBox="0 0 600 360" role="img" aria-labelledby="map-title map-desc">
-              <title id="map-title">The 20 by 12 world</title>
-              <desc id="map-desc">Nigel starts in the top-left. The log lies near the bottom-left. A five-column river runs down the middle; the bridge goes at its left bank on row 6. The house sits on the right side near the top. A dashed route visits log, river, far bank and house in order.</desc>
-              <defs>
-                <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-                  <path d="M30 0H0V30" fill="none" class="map-gridline"/>
-                </pattern>
-              </defs>
-              <rect width="600" height="360" class="map-grass"/>
-              <rect x="240" y="0" width="150" height="360" class="map-bank"/>
-              <rect x="270" y="0" width="90" height="360" class="map-water"/>
-              <rect width="600" height="360" fill="url(#grid)"/>
-              <!-- bridge -->
-              <rect x="270" y="186" width="90" height="18" rx="4" class="map-bridge"/>
-              <!-- log -->
-              <rect x="66" y="276" width="78" height="18" rx="7" class="map-log"/>
-              <!-- house -->
-              <rect x="450" y="30" width="60" height="90" rx="4" class="map-house"/>
-              <path d="M444 46 L480 22 L516 46" class="map-roof"/>
-              <!-- route -->
-              <polyline points="45,45 45,285 105,285" class="route r1"/>
-              <polyline points="105,285 105,195 255,195" class="route r2"/>
-              <polyline points="255,195 375,195" class="route r3"/>
-              <polyline points="375,195 375,105 465,105" class="route r4"/>
-              <!-- markers -->
-              <g class="pin pin-start"><circle cx="45" cy="45" r="11"/><text x="45" y="49">S</text></g>
-              <g class="pin"><circle cx="105" cy="285" r="11"/><text x="105" y="289">1</text></g>
-              <g class="pin"><circle cx="255" cy="195" r="11"/><text x="255" y="199">2</text></g>
-              <g class="pin"><circle cx="375" cy="195" r="11"/><text x="375" y="199">3</text></g>
-              <g class="pin"><circle cx="465" cy="105" r="11"/><text x="465" y="109">4</text></g>
-              <text x="315" y="22" class="map-label">river</text>
-            </svg>
-            <figcaption>The real layout from <code>engine.py</code>, one square per tile. The bridge spans the three water tiles once it's placed.</figcaption>
-          </figure>
 
           <ol class="steps">
             <li>
@@ -115,7 +83,7 @@
               <div><code class="goal">GOTO_HOUSE</code><h3>Go home</h3><p>Any tile of the house counts. Episode over, success.</p></div>
             </li>
           </ol>
-        </div>
+        <p class="small">The numbers match the pins in the animation above. Coordinates are (column, row) from the top-left, straight from <code>engine.py</code>.</p>
       </div>
     </section>
 
