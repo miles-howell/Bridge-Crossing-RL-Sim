@@ -112,6 +112,15 @@ p { margin: 0 0 1em; }
 .nav-links a { color: var(--muted); font-size: 0.92rem; font-weight: 500; }
 .nav-links a:hover { color: var(--text); text-decoration: none; }
 
+/* Back link to the parent site */
+.back-bar { background: var(--bg-alt); border-bottom: 1px solid var(--rule); }
+.back-link {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 0; color: var(--muted);
+  font-size: 0.85rem; font-weight: 600;
+}
+.back-link:hover { color: var(--accent); text-decoration: none; }
+
 /* Buttons */
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
